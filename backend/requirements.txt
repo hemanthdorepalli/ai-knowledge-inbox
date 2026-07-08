@@ -1,0 +1,11 @@
+# Verified on Python 3.11–3.14. These versions ship prebuilt wheels for all
+# supported Pythons (numpy 2.5.x is the first line with cp314 wheels).
+fastapi==0.139.0
+uvicorn[standard]==0.51.0
+google-genai==2.10.0
+httpx==0.28.1
+beautifulsoup4==4.15.0
+numpy==2.5.1
+pydantic==2.13.4
+pydantic-settings==2.14.2
+python-dotenv==1.2.2

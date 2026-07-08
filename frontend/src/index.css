@@ -1,0 +1,51 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+  background: #faf9f5;
+  color: #1f1e1d;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Refined, minimal scrollbar to match the calm aesthetic */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #d8d5ca transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #d8d5ca;
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #c4c1b5;
+  background-clip: content-box;
+}
+
+/* Answer text with links/paragraph spacing */
+.prose-answer p {
+  margin: 0 0 0.75rem;
+  line-height: 1.7;
+}
+.prose-answer p:last-child {
+  margin-bottom: 0;
+}
