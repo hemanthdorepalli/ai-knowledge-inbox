@@ -15,6 +15,7 @@ import Sidebar from "./Sidebar";
 import AddItemModal from "./AddItemModal";
 import ChatThread from "./ChatThread";
 import Composer from "./Composer";
+import McpServersModal from "./McpServersModal";
 
 const uid = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -46,6 +47,7 @@ export default function Inbox({ userName, userEmail, onSignOut }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [asking, setAsking] = useState(false);
   const [usage, setUsage] = useState<Usage | null>(null);
+  const [mcpModalOpen, setMcpModalOpen] = useState(false);
 
   const loadUsage = useCallback(async () => {
     try {
@@ -97,7 +99,13 @@ export default function Inbox({ userName, userEmail, onSignOut }: Props) {
         setMessages((prev) =>
           prev.map((m) =>
             m.id === assistantId
-              ? { ...m, content: res.answer, sources: res.sources, pending: false }
+              ? {
+                  ...m,
+                  content: res.answer,
+                  sources: res.sources,
+                  tool_calls: res.tool_calls,
+                  pending: false,
+                }
               : m
           )
         );
@@ -135,6 +143,7 @@ export default function Inbox({ userName, userEmail, onSignOut }: Props) {
             role: m.role,
             content: m.content,
             sources: m.sources ?? undefined,
+            tool_calls: m.tool_calls ?? undefined,
           }))
         );
       } catch {
@@ -174,6 +183,7 @@ export default function Inbox({ userName, userEmail, onSignOut }: Props) {
         userEmail={userEmail}
         onSignOut={onSignOut}
         usage={usage}
+        onOpenMcpServers={() => setMcpModalOpen(true)}
       />
 
       <AnimatePresence>
@@ -213,6 +223,8 @@ export default function Inbox({ userName, userEmail, onSignOut }: Props) {
         }}
         initialType={modalType}
       />
+
+      <McpServersModal open={mcpModalOpen} onClose={() => setMcpModalOpen(false)} />
     </div>
   );
 }

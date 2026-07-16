@@ -8,21 +8,29 @@ from app.config import settings
 from app.db import close_pool, init_pool
 from app.errors import AppError
 from app.logging_config import configure_logging, get_logger
-from app.routers import conversations, items, query, usage
+from app.mcp_demo_server import demo_mcp
+from app.routers import conversations, items, mcp_servers, query, usage
 
 configure_logging()
 logger = get_logger(__name__)
+
+# Built once at import time: FastMCP creates its session manager lazily the
+# first time this is called, and the manager must be started (below) inside
+# the app's lifespan for the mounted /mcp-demo routes to work.
+demo_mcp_app = demo_mcp.streamable_http_app()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_pool()
-    logger.info("startup_complete")
-    yield
+    async with demo_mcp.session_manager.run():
+        logger.info("startup_complete")
+        yield
     close_pool()
 
 
 app = FastAPI(title="AI Knowledge Inbox", version="1.0.0", lifespan=lifespan)
+app.mount("/mcp-demo", demo_mcp_app)
 
 app.add_middleware(
     CORSMiddleware,
@@ -52,3 +60,4 @@ app.include_router(items.router)
 app.include_router(query.router)
 app.include_router(conversations.router)
 app.include_router(usage.router)
+app.include_router(mcp_servers.router)

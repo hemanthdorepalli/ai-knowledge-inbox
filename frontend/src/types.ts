@@ -30,10 +30,18 @@ export interface SourceSnippet {
   score: number;
 }
 
+export interface ToolCallInfo {
+  server_name: string;
+  tool_name: string;
+  arguments: Record<string, unknown>;
+  result: string;
+}
+
 export interface QueryResponse {
   answer: string;
   sources: SourceSnippet[];
   conversation_id: string;
+  tool_calls: ToolCallInfo[];
 }
 
 export interface Conversation {
@@ -49,6 +57,21 @@ export interface MessageOut {
   role: "user" | "assistant";
   content: string;
   sources?: SourceSnippet[] | null;
+  tool_calls?: ToolCallInfo[] | null;
+  created_at: string;
+}
+
+export interface McpTool {
+  name: string;
+  description: string;
+}
+
+export interface McpServer {
+  id: string;
+  name: string;
+  url: string;
+  enabled: boolean;
+  tools: McpTool[];
   created_at: string;
 }
 
@@ -65,6 +88,7 @@ export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   sources?: SourceSnippet[];
+  tool_calls?: ToolCallInfo[];
   pending?: boolean;
   error?: boolean;
 }

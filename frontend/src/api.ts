@@ -7,6 +7,7 @@ import type {
   IngestRequest,
   IngestResponse,
   Item,
+  McpServer,
   MessageOut,
   QueryResponse,
   Usage,
@@ -110,6 +111,30 @@ export function deleteConversation(conversationId: string): Promise<void> {
 
 export function getUsage(): Promise<Usage> {
   return request<Usage>("/usage");
+}
+
+export function listMcpServers(): Promise<McpServer[]> {
+  return request<McpServer[]>("/mcp-servers");
+}
+
+export function addMcpServer(body: {
+  name: string;
+  url: string;
+  auth_token?: string;
+}): Promise<McpServer> {
+  return request<McpServer>("/mcp-servers", { method: "POST", body: JSON.stringify(body) });
+}
+
+export function deleteMcpServer(id: string): Promise<void> {
+  return request<void>(`/mcp-servers/${id}`, { method: "DELETE" });
+}
+
+export function toggleMcpServer(id: string, enabled: boolean): Promise<McpServer> {
+  return request<McpServer>(`/mcp-servers/${id}?enabled=${enabled}`, { method: "PATCH" });
+}
+
+export function refreshMcpServer(id: string): Promise<McpServer> {
+  return request<McpServer>(`/mcp-servers/${id}/refresh`, { method: "POST" });
 }
 
 // File upload can't use request(): it sends multipart/form-data, so we must NOT

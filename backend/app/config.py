@@ -30,6 +30,15 @@ class Settings(BaseSettings):
     # embeddings and chat). Protects the shared Gemini key from runaway cost.
     default_token_quota: int = 50_000
 
+    # Dev-only escape hatch: allows MCP server URLs that resolve to localhost /
+    # private IPs, so a developer can test against a locally-running MCP server.
+    # Must stay False in any real deployment -- it exists purely for local dev.
+    allow_local_mcp_urls: bool = False
+
+    # Max tool-calling round trips per question, so a misbehaving MCP server
+    # (or a model stuck calling tools) can't loop indefinitely on one request.
+    mcp_max_tool_rounds: int = 4
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]

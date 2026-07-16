@@ -4,6 +4,7 @@ import type { ChatMessage } from "../types";
 import { useTypewriter } from "../hooks/useTypewriter";
 import ThinkingDots from "./ThinkingDots";
 import SourceCitations from "./SourceCitations";
+import ToolCallChips from "./ToolCallChips";
 
 interface Props {
   message: ChatMessage;
@@ -51,6 +52,9 @@ function AssistantContent({ message, animate }: Props) {
 
   return (
     <>
+      {message.tool_calls && message.tool_calls.length > 0 && (
+        <ToolCallChips toolCalls={message.tool_calls} />
+      )}
       <div
         className={`prose-answer whitespace-pre-wrap text-[15px] leading-relaxed ${
           message.error ? "text-accent-hover" : "text-ink"

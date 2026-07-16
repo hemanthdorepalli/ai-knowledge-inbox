@@ -126,6 +126,7 @@ create table if not exists messages (
     role            text not null check (role in ('user', 'assistant')),
     content         text not null,
     sources         jsonb,   -- retrieved source snippets for assistant messages
+    tool_calls      jsonb,   -- MCP tool calls made while answering, if any
     created_at      timestamptz not null default now()
 );
 
@@ -161,4 +162,32 @@ alter table user_usage enable row level security;
 
 drop policy if exists "user_usage_own_row" on user_usage;
 create policy "user_usage_own_row" on user_usage
+    for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- ----------------------------------------------------------------------------
+-- 8. MCP servers: remote tool servers a user has connected. The LLM can call
+--    their tools during a chat answer (via Gemini function calling). Only
+--    remote HTTP servers are ever supported -- never a spawned process, which
+--    would be remote code execution on this backend. `tools` caches the last
+--    known tool list (refreshed on add / manual refresh) so a chat turn
+--    doesn't have to round-trip to every connected server just to see what's
+--    available.
+-- ----------------------------------------------------------------------------
+create table if not exists mcp_servers (
+    id          uuid primary key default gen_random_uuid(),
+    user_id     uuid not null references auth.users(id) on delete cascade,
+    name        text not null,
+    url         text not null,
+    auth_token  text,
+    enabled     boolean not null default true,
+    tools       jsonb not null default '[]'::jsonb,
+    created_at  timestamptz not null default now()
+);
+
+create index if not exists idx_mcp_servers_user on mcp_servers(user_id);
+
+alter table mcp_servers enable row level security;
+
+drop policy if exists "mcp_servers_own_rows" on mcp_servers;
+create policy "mcp_servers_own_rows" on mcp_servers
     for all using (auth.uid() = user_id) with check (auth.uid() = user_id);

@@ -140,15 +140,28 @@ def delete_conversation(*, user_id: str, conversation_id: str) -> None:
 
 
 def insert_message(
-    *, user_id: str, conversation_id: str, role: str, content: str, sources: list | None
+    *,
+    user_id: str,
+    conversation_id: str,
+    role: str,
+    content: str,
+    sources: list | None,
+    tool_calls: list | None = None,
 ) -> None:
     with get_connection() as conn:
         conn.execute(
             """
-            INSERT INTO messages (user_id, conversation_id, role, content, sources)
-            VALUES (%s, %s, %s, %s, %s)
+            INSERT INTO messages (user_id, conversation_id, role, content, sources, tool_calls)
+            VALUES (%s, %s, %s, %s, %s, %s)
             """,
-            (user_id, conversation_id, role, content, Json(sources) if sources is not None else None),
+            (
+                user_id,
+                conversation_id,
+                role,
+                content,
+                Json(sources) if sources is not None else None,
+                Json(tool_calls) if tool_calls is not None else None,
+            ),
         )
 
 
@@ -164,7 +177,7 @@ def list_messages(*, user_id: str, conversation_id: str) -> list[dict]:
     with get_connection() as conn:
         rows = conn.execute(
             """
-            SELECT id, role, content, sources, created_at
+            SELECT id, role, content, sources, tool_calls, created_at
             FROM messages
             WHERE conversation_id = %s AND user_id = %s
             ORDER BY created_at ASC
@@ -204,3 +217,105 @@ def add_tokens_used(*, user_id: str, tokens: int) -> None:
             """,
             (tokens, user_id),
         )
+
+
+# --- MCP servers ---------------------------------------------------------------
+
+
+def create_mcp_server(
+    *, user_id: str, name: str, url: str, auth_token: str | None, tools: list[dict]
+) -> dict:
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            INSERT INTO mcp_servers (user_id, name, url, auth_token, tools)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING id, name, url, enabled, tools, created_at
+            """,
+            (user_id, name, url, auth_token, Json(tools)),
+        ).fetchone()
+    row["id"] = str(row["id"])
+    return row
+
+
+def list_mcp_servers(*, user_id: str) -> list[dict]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, name, url, enabled, tools, created_at
+            FROM mcp_servers
+            WHERE user_id = %s
+            ORDER BY created_at DESC
+            """,
+            (user_id,),
+        ).fetchall()
+    for row in rows:
+        row["id"] = str(row["id"])
+    return rows
+
+
+def list_enabled_mcp_servers_with_auth(*, user_id: str) -> list[dict]:
+    """Includes auth_token -- only for internal use when actually calling tools."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, name, url, auth_token, tools
+            FROM mcp_servers
+            WHERE user_id = %s AND enabled = true
+            """,
+            (user_id,),
+        ).fetchall()
+    for row in rows:
+        row["id"] = str(row["id"])
+    return rows
+
+
+def delete_mcp_server(*, user_id: str, server_id: str) -> None:
+    with get_connection() as conn:
+        conn.execute(
+            "DELETE FROM mcp_servers WHERE id = %s AND user_id = %s", (server_id, user_id)
+        )
+
+
+def set_mcp_server_enabled(*, user_id: str, server_id: str, enabled: bool) -> dict:
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            UPDATE mcp_servers SET enabled = %s
+            WHERE id = %s AND user_id = %s
+            RETURNING id, name, url, enabled, tools, created_at
+            """,
+            (enabled, server_id, user_id),
+        ).fetchone()
+    if row is None:
+        raise ItemNotFoundError("MCP server not found")
+    row["id"] = str(row["id"])
+    return row
+
+
+def get_mcp_server(*, user_id: str, server_id: str) -> dict:
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT id, name, url, auth_token FROM mcp_servers WHERE id = %s AND user_id = %s",
+            (server_id, user_id),
+        ).fetchone()
+    if row is None:
+        raise ItemNotFoundError("MCP server not found")
+    row["id"] = str(row["id"])
+    return row
+
+
+def update_mcp_server_tools(*, user_id: str, server_id: str, tools: list[dict]) -> dict:
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            UPDATE mcp_servers SET tools = %s
+            WHERE id = %s AND user_id = %s
+            RETURNING id, name, url, enabled, tools, created_at
+            """,
+            (Json(tools), server_id, user_id),
+        ).fetchone()
+    if row is None:
+        raise ItemNotFoundError("MCP server not found")
+    row["id"] = str(row["id"])
+    return row

@@ -62,10 +62,18 @@ class SourceSnippet(BaseModel):
     score: float
 
 
+class ToolCallInfo(BaseModel):
+    server_name: str
+    tool_name: str
+    arguments: dict
+    result: str
+
+
 class QueryResponse(BaseModel):
     answer: str
     sources: list[SourceSnippet]
     conversation_id: str
+    tool_calls: list[ToolCallInfo] = Field(default_factory=list)
 
 
 class ConversationSummary(BaseModel):
@@ -80,6 +88,7 @@ class MessageOut(BaseModel):
     role: Literal["user", "assistant"]
     content: str
     sources: list[SourceSnippet] | None = None
+    tool_calls: list[ToolCallInfo] | None = None
     created_at: datetime
 
 
@@ -87,3 +96,29 @@ class UsageResponse(BaseModel):
     tokens_used: int
     tokens_limit: int
     tokens_remaining: int
+
+
+class McpServerCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    url: str = Field(min_length=1)
+    auth_token: str | None = None
+
+    @model_validator(mode="after")
+    def check_url(self) -> "McpServerCreate":
+        if not (self.url.startswith("http://") or self.url.startswith("https://")):
+            raise ValueError("url must start with http:// or https://")
+        return self
+
+
+class McpToolInfo(BaseModel):
+    name: str
+    description: str
+
+
+class McpServerSummary(BaseModel):
+    id: str
+    name: str
+    url: str
+    enabled: bool
+    tools: list[McpToolInfo]
+    created_at: datetime

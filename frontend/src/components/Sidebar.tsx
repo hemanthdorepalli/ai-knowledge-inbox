@@ -5,6 +5,7 @@ import {
   LogOut,
   MessageSquare,
   PanelLeftClose,
+  Plug,
   Plus,
   Sparkles,
   Trash2,
@@ -29,6 +30,7 @@ interface Props {
   userEmail: string;
   onSignOut: () => void;
   usage: Usage | null;
+  onOpenMcpServers: () => void;
 }
 
 export default function Sidebar({
@@ -46,6 +48,7 @@ export default function Sidebar({
   userEmail,
   onSignOut,
   usage,
+  onOpenMcpServers,
 }: Props) {
   return (
     <motion.aside
@@ -195,6 +198,16 @@ export default function Sidebar({
         </div>
 
         {usage && <UsageBar usage={usage} />}
+
+        <div className="px-3 pb-1 pt-2">
+          <button
+            onClick={onOpenMcpServers}
+            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-xs font-medium text-white/60 transition-colors hover:bg-white/10 hover:text-white"
+          >
+            <Plug size={14} />
+            MCP Servers
+          </button>
+        </div>
 
         <div className="mt-auto flex items-center gap-2 border-t border-white/10 px-4 py-3">
           <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/10 text-xs font-semibold uppercase text-white">
