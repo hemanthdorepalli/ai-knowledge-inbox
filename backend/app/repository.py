@@ -44,10 +44,14 @@ def insert_chunks(
 
 
 def list_items(*, user_id: str) -> list[dict]:
+    # Truncate raw_content to the snippet length in SQL so a full PDF/article's
+    # text never crosses the network just to be thrown away client-side.
     with get_connection() as conn:
         rows = conn.execute(
-            """
-            SELECT i.id, i.type, i.title, i.source_url, i.raw_content, i.created_at,
+            f"""
+            SELECT i.id, i.type, i.title, i.source_url, i.created_at,
+                   LEFT(i.raw_content, {SNIPPET_LENGTH}) AS snippet_raw,
+                   length(i.raw_content) > {SNIPPET_LENGTH} AS truncated,
                    COUNT(c.id) AS chunk_count
             FROM items i
             LEFT JOIN chunks c ON c.item_id = i.id
@@ -60,9 +64,10 @@ def list_items(*, user_id: str) -> list[dict]:
 
     items = []
     for row in rows:
-        content = row.pop("raw_content")
+        snippet_raw = row.pop("snippet_raw")
+        truncated = row.pop("truncated")
         row["id"] = str(row["id"])
-        row["snippet"] = content[:SNIPPET_LENGTH] + ("..." if len(content) > SNIPPET_LENGTH else "")
+        row["snippet"] = snippet_raw + ("..." if truncated else "")
         items.append(row)
     return items
 
