@@ -12,7 +12,9 @@ import type {
 } from "./types";
 import { supabase } from "./supabase";
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8000";
+// Strip any trailing slash so `${API_BASE}${path}` never produces a double
+// slash regardless of how the env var is set (e.g. "...onrender.com/").
+const API_BASE = (import.meta.env.VITE_API_BASE ?? "http://localhost:8000").replace(/\/+$/, "");
 
 // The backend requires a logged-in user, so every request carries the current
 // Supabase access token as a bearer token.
