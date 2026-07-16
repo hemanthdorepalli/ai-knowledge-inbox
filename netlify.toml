@@ -1,0 +1,14 @@
+# Netlify build config for the frontend, since it lives in a subdirectory
+# of this monorepo. Point Netlify's "Base directory" at frontend/, or leave
+# this file at the repo root and Netlify will pick it up automatically.
+[build]
+  base = "frontend"
+  command = "npm run build"
+  publish = "dist"
+
+# React Router / client-side routing safety net (not used yet, but harmless
+# and avoids 404s if routes are added later).
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

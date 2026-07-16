@@ -1,0 +1,29 @@
+# Render blueprint for the backend. Deploy via Render Dashboard -> New ->
+# Blueprint, pointing at this repo. Render reads this file automatically.
+# (You can also skip this file and configure the same settings by hand in the
+# dashboard — see the deploy notes for that path.)
+services:
+  - type: web
+    name: ai-knowledge-inbox-backend
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    plan: free
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: EMBEDDING_MODEL
+        value: gemini-embedding-001
+      - key: CHAT_MODEL
+        value: gemini-2.5-flash
+      - key: EMBEDDING_DIM
+        value: "768"
+      - key: SUPABASE_DB_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
