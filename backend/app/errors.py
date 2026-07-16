@@ -38,3 +38,9 @@ class LlmProviderError(AppError):
     """Raised when the embeddings or chat completion API call fails."""
 
     status_code = 502
+
+
+class QuotaExceededError(AppError):
+    """Raised when a user has used up their lifetime token budget."""
+
+    status_code = 429

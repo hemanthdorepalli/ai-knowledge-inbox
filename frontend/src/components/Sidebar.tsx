@@ -9,7 +9,7 @@ import {
   Sparkles,
   Trash2,
 } from "lucide-react";
-import type { Conversation, Item } from "../types";
+import type { Conversation, Item, Usage } from "../types";
 
 interface Props {
   // knowledge base
@@ -28,6 +28,7 @@ interface Props {
   onToggle: () => void;
   userEmail: string;
   onSignOut: () => void;
+  usage: Usage | null;
 }
 
 export default function Sidebar({
@@ -44,6 +45,7 @@ export default function Sidebar({
   onToggle,
   userEmail,
   onSignOut,
+  usage,
 }: Props) {
   return (
     <motion.aside
@@ -192,6 +194,8 @@ export default function Sidebar({
           </section>
         </div>
 
+        {usage && <UsageBar usage={usage} />}
+
         <div className="mt-auto flex items-center gap-2 border-t border-white/10 px-4 py-3">
           <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/10 text-xs font-semibold uppercase text-white">
             {userEmail.charAt(0)}
@@ -210,5 +214,27 @@ export default function Sidebar({
         </div>
       </div>
     </motion.aside>
+  );
+}
+
+function UsageBar({ usage }: { usage: Usage }) {
+  const pct = usage.tokens_limit > 0 ? Math.min(100, (usage.tokens_used / usage.tokens_limit) * 100) : 0;
+  const low = usage.tokens_remaining <= usage.tokens_limit * 0.1;
+
+  return (
+    <div className="px-4 pb-1 pt-2">
+      <div className="mb-1.5 flex items-center justify-between text-[11px] text-white/50">
+        <span>Tokens</span>
+        <span className={low ? "font-medium text-accent" : ""}>
+          {usage.tokens_used.toLocaleString()} / {usage.tokens_limit.toLocaleString()}
+        </span>
+      </div>
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+        <div
+          className={`h-full rounded-full transition-all ${low ? "bg-accent" : "bg-white/40"}`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
   );
 }

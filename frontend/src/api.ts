@@ -9,6 +9,7 @@ import type {
   Item,
   MessageOut,
   QueryResponse,
+  Usage,
 } from "./types";
 import { supabase } from "./supabase";
 
@@ -105,6 +106,10 @@ export function getMessages(conversationId: string): Promise<MessageOut[]> {
 
 export function deleteConversation(conversationId: string): Promise<void> {
   return request<void>(`/conversations/${conversationId}`, { method: "DELETE" });
+}
+
+export function getUsage(): Promise<Usage> {
+  return request<Usage>("/usage");
 }
 
 // File upload can't use request(): it sends multipart/form-data, so we must NOT

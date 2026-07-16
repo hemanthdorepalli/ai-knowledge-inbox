@@ -8,7 +8,7 @@ from app import repository
 from app.errors import EmptyContentError
 from app.logging_config import get_logger
 from app.schemas import IngestRequest, IngestResponse
-from app.services import documents, ingestion
+from app.services import documents, ingestion, usage
 from app.services.chunking import chunk_text
 from app.services.embeddings import embed_texts
 
@@ -50,7 +50,13 @@ def _persist(
     if not chunks:
         raise EmptyContentError("No content available to chunk after normalization")
 
+    # Check quota before spending any API calls on this ingest. Embeddings
+    # report no token usage, so cost is estimated from character count.
+    estimated_tokens = sum(usage.estimate_tokens(c) for c in chunks)
+    usage.check_quota(user_id=user_id, needed_tokens=estimated_tokens)
+
     embeddings = embed_texts(chunks)
+    usage.record_usage(user_id=user_id, tokens=estimated_tokens)
 
     item = repository.insert_item(
         user_id=user_id, type_=type_, title=title, source_url=source_url, raw_content=raw_content

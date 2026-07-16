@@ -68,3 +68,9 @@ export interface ChatMessage {
   pending?: boolean;
   error?: boolean;
 }
+
+export interface Usage {
+  tokens_used: number;
+  tokens_limit: number;
+  tokens_remaining: number;
+}

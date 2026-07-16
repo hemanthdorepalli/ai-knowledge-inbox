@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     chunk_overlap_chars: int = 150
     top_k: int = 5
 
+    # Fixed lifetime token budget given to a new user (covers both ingestion
+    # embeddings and chat). Protects the shared Gemini key from runaway cost.
+    default_token_quota: int = 50_000
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]

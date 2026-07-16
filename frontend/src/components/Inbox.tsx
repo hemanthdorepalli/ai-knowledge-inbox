@@ -7,9 +7,10 @@ import {
   listConversations,
   getMessages,
   deleteConversation as apiDeleteConversation,
+  getUsage,
   ApiError,
 } from "../api";
-import type { ChatMessage, Conversation, Item, SourceType } from "../types";
+import type { ChatMessage, Conversation, Item, SourceType, Usage } from "../types";
 import Sidebar from "./Sidebar";
 import AddItemModal from "./AddItemModal";
 import ChatThread from "./ChatThread";
@@ -44,6 +45,15 @@ export default function Inbox({ userName, userEmail, onSignOut }: Props) {
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [asking, setAsking] = useState(false);
+  const [usage, setUsage] = useState<Usage | null>(null);
+
+  const loadUsage = useCallback(async () => {
+    try {
+      setUsage(await getUsage());
+    } catch {
+      /* non-fatal: usage bar just stays hidden */
+    }
+  }, []);
 
   const loadItems = useCallback(async () => {
     setLoadError(null);
@@ -67,7 +77,8 @@ export default function Inbox({ userName, userEmail, onSignOut }: Props) {
   useEffect(() => {
     loadItems();
     loadConversations();
-  }, [loadItems, loadConversations]);
+    loadUsage();
+  }, [loadItems, loadConversations, loadUsage]);
 
   const handleAsk = useCallback(
     async (question: string) => {
@@ -91,6 +102,7 @@ export default function Inbox({ userName, userEmail, onSignOut }: Props) {
           )
         );
         loadConversations();
+        loadUsage();
       } catch (err) {
         const message =
           err instanceof ApiError ? err.message : "Something went wrong. Please try again.";
@@ -103,7 +115,7 @@ export default function Inbox({ userName, userEmail, onSignOut }: Props) {
         setAsking(false);
       }
     },
-    [asking, currentConversationId, loadConversations]
+    [asking, currentConversationId, loadConversations, loadUsage]
   );
 
   const newChat = useCallback(() => {
@@ -161,6 +173,7 @@ export default function Inbox({ userName, userEmail, onSignOut }: Props) {
         onToggle={() => setCollapsed(true)}
         userEmail={userEmail}
         onSignOut={onSignOut}
+        usage={usage}
       />
 
       <AnimatePresence>
@@ -194,7 +207,10 @@ export default function Inbox({ userName, userEmail, onSignOut }: Props) {
       <AddItemModal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
-        onAdded={loadItems}
+        onAdded={() => {
+          loadItems();
+          loadUsage();
+        }}
         initialType={modalType}
       />
     </div>

@@ -8,6 +8,7 @@ real auth is wired in Phase 2 — this app-level scoping is defense in depth.)
 import numpy as np
 from psycopg.types.json import Json
 
+from app.config import settings
 from app.db import get_connection
 from app.errors import ItemNotFoundError
 
@@ -173,3 +174,33 @@ def list_messages(*, user_id: str, conversation_id: str) -> list[dict]:
     for row in rows:
         row["id"] = str(row["id"])
     return rows
+
+
+# --- Token usage (lifetime quota) ---------------------------------------------
+
+
+def get_usage(*, user_id: str) -> dict:
+    """Return {tokens_used, tokens_limit}, creating the row on first use."""
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            INSERT INTO user_usage (user_id, tokens_limit)
+            VALUES (%s, %s)
+            ON CONFLICT (user_id) DO UPDATE SET user_id = EXCLUDED.user_id
+            RETURNING tokens_used, tokens_limit
+            """,
+            (user_id, settings.default_token_quota),
+        ).fetchone()
+    return row
+
+
+def add_tokens_used(*, user_id: str, tokens: int) -> None:
+    with get_connection() as conn:
+        conn.execute(
+            """
+            UPDATE user_usage
+            SET tokens_used = tokens_used + %s, updated_at = now()
+            WHERE user_id = %s
+            """,
+            (tokens, user_id),
+        )

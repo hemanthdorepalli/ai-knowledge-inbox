@@ -8,7 +8,7 @@ from app.config import settings
 from app.db import close_pool, init_pool
 from app.errors import AppError
 from app.logging_config import configure_logging, get_logger
-from app.routers import conversations, items, query
+from app.routers import conversations, items, query, usage
 
 configure_logging()
 logger = get_logger(__name__)
@@ -51,3 +51,4 @@ def health() -> dict:
 app.include_router(items.router)
 app.include_router(query.router)
 app.include_router(conversations.router)
+app.include_router(usage.router)

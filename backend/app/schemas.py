@@ -81,3 +81,9 @@ class MessageOut(BaseModel):
     content: str
     sources: list[SourceSnippet] | None = None
     created_at: datetime
+
+
+class UsageResponse(BaseModel):
+    tokens_used: int
+    tokens_limit: int
+    tokens_remaining: int

@@ -143,3 +143,22 @@ create policy "conversations_own_rows" on conversations
 drop policy if exists "messages_own_rows" on messages;
 create policy "messages_own_rows" on messages
     for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- ----------------------------------------------------------------------------
+-- 7. Token usage: a fixed lifetime token budget per user, covering both
+--    ingestion (embeddings) and chat. Protects the shared Gemini API key from
+--    runaway cost -- once a user's tokens_used reaches tokens_limit, the
+--    backend rejects further ingest/query requests with a clear 429.
+-- ----------------------------------------------------------------------------
+create table if not exists user_usage (
+    user_id     uuid primary key references auth.users(id) on delete cascade,
+    tokens_used bigint not null default 0,
+    tokens_limit bigint not null default 50000,
+    updated_at  timestamptz not null default now()
+);
+
+alter table user_usage enable row level security;
+
+drop policy if exists "user_usage_own_row" on user_usage;
+create policy "user_usage_own_row" on user_usage
+    for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
