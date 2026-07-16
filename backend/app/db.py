@@ -1,48 +1,58 @@
-import os
-import sqlite3
+"""Postgres (Supabase) connection pool with pgvector support.
+
+Replaces the old SQLite layer. A small pool of connections is opened at
+startup; each connection registers the pgvector type adapter so we can bind and
+read numpy vectors directly. Rows come back as dicts.
+"""
+
 from contextlib import contextmanager
 from typing import Iterator
 
+import psycopg
+from pgvector.psycopg import register_vector
+from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
+
 from app.config import settings
+from app.logging_config import get_logger
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS items (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    type TEXT NOT NULL CHECK(type IN ('note', 'url')),
-    title TEXT,
-    source_url TEXT,
-    raw_content TEXT NOT NULL,
-    created_at TEXT NOT NULL
-);
+logger = get_logger(__name__)
 
-CREATE TABLE IF NOT EXISTS chunks (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
-    chunk_index INTEGER NOT NULL,
-    chunk_text TEXT NOT NULL,
-    embedding BLOB NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_chunks_item_id ON chunks(item_id);
-"""
+_pool: ConnectionPool | None = None
 
 
-def init_db() -> None:
-    os.makedirs(os.path.dirname(settings.db_path) or ".", exist_ok=True)
-    with get_connection() as conn:
-        conn.executescript(SCHEMA)
+def _configure(conn: psycopg.Connection) -> None:
+    # Teaches this connection how to translate between numpy arrays and the
+    # Postgres `vector` type, so we can pass embeddings straight through.
+    register_vector(conn)
+
+
+def init_pool() -> None:
+    global _pool
+    if _pool is None:
+        _pool = ConnectionPool(
+            settings.supabase_db_url,
+            min_size=1,
+            max_size=5,
+            configure=_configure,
+            kwargs={"row_factory": dict_row},
+            open=True,
+        )
+        logger.info("db_pool_opened")
+
+
+def close_pool() -> None:
+    global _pool
+    if _pool is not None:
+        _pool.close()
+        _pool = None
+        logger.info("db_pool_closed")
 
 
 @contextmanager
-def get_connection() -> Iterator[sqlite3.Connection]:
-    conn = sqlite3.connect(settings.db_path)
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.row_factory = sqlite3.Row
-    try:
+def get_connection() -> Iterator[psycopg.Connection]:
+    if _pool is None:
+        raise RuntimeError("DB pool not initialized — call init_pool() first")
+    # The pool context commits on clean exit and rolls back on exception.
+    with _pool.connection() as conn:
         yield conn
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()

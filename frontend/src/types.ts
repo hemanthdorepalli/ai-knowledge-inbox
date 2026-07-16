@@ -1,10 +1,10 @@
 // Mirrors the backend Pydantic schemas (see backend/app/schemas.py).
 // Kept in one place so request/response shapes stay in sync across components.
 
-export type SourceType = "note" | "url";
+export type SourceType = "note" | "url" | "document";
 
 export interface Item {
-  id: number;
+  id: string;
   type: SourceType;
   title: string | null;
   source_url: string | null;
@@ -14,7 +14,7 @@ export interface Item {
 }
 
 export interface IngestResponse {
-  id: number;
+  id: string;
   type: SourceType;
   title: string | null;
   source_url: string | null;
@@ -23,7 +23,7 @@ export interface IngestResponse {
 }
 
 export interface SourceSnippet {
-  item_id: number;
+  item_id: string;
   title: string | null;
   source_url: string | null;
   chunk_text: string;
@@ -33,6 +33,23 @@ export interface SourceSnippet {
 export interface QueryResponse {
   answer: string;
   sources: SourceSnippet[];
+  conversation_id: string;
+}
+
+export interface Conversation {
+  id: string;
+  title: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// A message as stored/loaded from history (POST /query persists these).
+export interface MessageOut {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  sources?: SourceSnippet[] | null;
+  created_at: string;
 }
 
 // Request bodies for POST /ingest. Exactly one of content/url is used,

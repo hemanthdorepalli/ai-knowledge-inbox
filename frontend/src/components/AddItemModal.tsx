@@ -1,41 +1,56 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { FileText, Link2, Loader2, X } from "lucide-react";
-import { ingest, ApiError } from "../api";
+import { FileText, Link2, Loader2, Upload, X } from "lucide-react";
+import { ingest, ingestDocument, ApiError } from "../api";
 import type { SourceType } from "../types";
 
 interface Props {
   open: boolean;
   onClose: () => void;
   onAdded: () => void;
+  initialType?: SourceType;
 }
 
-// Modal for adding a note or URL to the knowledge base. Animated backdrop +
-// spring-in card. On success it refreshes the sidebar and closes itself.
-export default function AddItemModal({ open, onClose, onAdded }: Props) {
+// Modal for adding a note, URL, or document to the knowledge base. Animated
+// backdrop + spring-in card. On success it refreshes the sidebar and closes.
+export default function AddItemModal({ open, onClose, onAdded, initialType }: Props) {
   const [type, setType] = useState<SourceType>("note");
+
+  // Whenever the modal opens, start on the requested tab (e.g. the pill clicked).
+  useEffect(() => {
+    if (open) setType(initialType ?? "note");
+  }, [open, initialType]);
   const [content, setContent] = useState("");
   const [url, setUrl] = useState("");
   const [title, setTitle] = useState("");
+  const [file, setFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
 
   function reset() {
     setContent("");
     setUrl("");
     setTitle("");
+    setFile(null);
     setError(null);
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    if (type === "document" && !file) {
+      setError("Choose a PDF, DOCX, TXT, or MD file to upload.");
+      return;
+    }
     setSubmitting(true);
     try {
       if (type === "note") {
         await ingest({ type: "note", content, title: title || undefined });
-      } else {
+      } else if (type === "url") {
         await ingest({ type: "url", url, title: title || undefined });
+      } else {
+        await ingestDocument(file!, title || undefined);
       }
       reset();
       onAdded();
@@ -78,18 +93,19 @@ export default function AddItemModal({ open, onClose, onAdded }: Props) {
               </button>
             </div>
 
-            <div className="mb-4 grid grid-cols-2 gap-2">
+            <div className="mb-4 grid grid-cols-3 gap-2">
               {(
                 [
                   { key: "note", label: "Note", icon: FileText },
                   { key: "url", label: "Link", icon: Link2 },
+                  { key: "document", label: "Document", icon: Upload },
                 ] as const
               ).map(({ key, label, icon: Icon }) => (
                 <button
                   key={key}
                   type="button"
                   onClick={() => setType(key)}
-                  className={`flex items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-medium transition-all ${
+                  className={`flex items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-medium transition-all ${
                     type === key
                       ? "border-accent bg-accent-soft text-accent-hover"
                       : "border-line bg-card text-muted hover:border-accent/30"
@@ -110,7 +126,7 @@ export default function AddItemModal({ open, onClose, onAdded }: Props) {
                   exit={{ opacity: 0, y: -6 }}
                   transition={{ duration: 0.15 }}
                 >
-                  {type === "note" ? (
+                  {type === "note" && (
                     <textarea
                       value={content}
                       onChange={(e) => setContent(e.target.value)}
@@ -120,7 +136,8 @@ export default function AddItemModal({ open, onClose, onAdded }: Props) {
                       autoFocus
                       className="w-full resize-y rounded-xl border border-line bg-panel/50 px-3.5 py-2.5 text-sm text-ink placeholder:text-faint focus:border-accent/40 focus:bg-card focus:outline-none"
                     />
-                  ) : (
+                  )}
+                  {type === "url" && (
                     <input
                       type="url"
                       value={url}
@@ -130,6 +147,26 @@ export default function AddItemModal({ open, onClose, onAdded }: Props) {
                       autoFocus
                       className="w-full rounded-xl border border-line bg-panel/50 px-3.5 py-2.5 text-sm text-ink placeholder:text-faint focus:border-accent/40 focus:bg-card focus:outline-none"
                     />
+                  )}
+                  {type === "document" && (
+                    <button
+                      type="button"
+                      onClick={() => fileInput.current?.click()}
+                      className="flex w-full flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-line bg-panel/50 px-4 py-8 text-center transition-colors hover:border-accent/40"
+                    >
+                      <Upload size={22} className="text-accent" />
+                      <span className="text-sm font-medium text-ink">
+                        {file ? file.name : "Choose a file"}
+                      </span>
+                      <span className="text-xs text-faint">PDF, DOCX, TXT, or MD · up to 10 MB</span>
+                      <input
+                        ref={fileInput}
+                        type="file"
+                        accept=".pdf,.docx,.txt,.md"
+                        onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                        className="hidden"
+                      />
+                    </button>
                   )}
                 </motion.div>
               </AnimatePresence>

@@ -3,13 +3,24 @@
 // URL live in exactly one file.
 
 import type {
+  Conversation,
   IngestRequest,
   IngestResponse,
   Item,
+  MessageOut,
   QueryResponse,
 } from "./types";
+import { supabase } from "./supabase";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8000";
+
+// The backend requires a logged-in user, so every request carries the current
+// Supabase access token as a bearer token.
+async function authHeader(): Promise<Record<string, string>> {
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 // The backend returns two error shapes:
 //   - domain errors:      { detail: "human readable message" }
@@ -29,7 +40,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     response = await fetch(`${API_BASE}${path}`, {
       ...init,
-      headers: { "Content-Type": "application/json", ...init?.headers },
+      headers: {
+        "Content-Type": "application/json",
+        ...(await authHeader()),
+        ...init?.headers,
+      },
     });
   } catch {
     throw new ApiError(0, `Cannot reach the API at ${API_BASE}. Is the backend running?`);
@@ -68,9 +83,48 @@ export function ingest(body: IngestRequest): Promise<IngestResponse> {
   });
 }
 
-export function query(question: string): Promise<QueryResponse> {
+export function query(
+  question: string,
+  conversationId?: string | null
+): Promise<QueryResponse> {
   return request<QueryResponse>("/query", {
     method: "POST",
-    body: JSON.stringify({ question }),
+    body: JSON.stringify({ question, conversation_id: conversationId ?? null }),
   });
+}
+
+export function listConversations(): Promise<Conversation[]> {
+  return request<Conversation[]>("/conversations");
+}
+
+export function getMessages(conversationId: string): Promise<MessageOut[]> {
+  return request<MessageOut[]>(`/conversations/${conversationId}/messages`);
+}
+
+export function deleteConversation(conversationId: string): Promise<void> {
+  return request<void>(`/conversations/${conversationId}`, { method: "DELETE" });
+}
+
+// File upload can't use request(): it sends multipart/form-data, so we must NOT
+// set Content-Type (the browser adds it with the correct boundary).
+export async function ingestDocument(file: File, title?: string): Promise<IngestResponse> {
+  const form = new FormData();
+  form.append("file", file);
+  if (title) form.append("title", title);
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/ingest/document`, {
+      method: "POST",
+      headers: await authHeader(),
+      body: form,
+    });
+  } catch {
+    throw new ApiError(0, `Cannot reach the API at ${API_BASE}. Is the backend running?`);
+  }
+
+  if (!response.ok) {
+    throw new ApiError(response.status, await extractErrorMessage(response));
+  }
+  return (await response.json()) as IngestResponse;
 }

@@ -24,8 +24,8 @@ class IngestRequest(BaseModel):
 
 
 class IngestResponse(BaseModel):
-    id: int
-    type: Literal["note", "url"]
+    id: str
+    type: Literal["note", "url", "document"]
     title: str | None
     source_url: str | None
     created_at: datetime
@@ -33,8 +33,8 @@ class IngestResponse(BaseModel):
 
 
 class ItemSummary(BaseModel):
-    id: int
-    type: Literal["note", "url"]
+    id: str
+    type: Literal["note", "url", "document"]
     title: str | None
     source_url: str | None
     snippet: str
@@ -44,6 +44,8 @@ class ItemSummary(BaseModel):
 
 class QueryRequest(BaseModel):
     question: str = Field(min_length=1)
+    # Continue an existing chat, or omit/null to start a new one.
+    conversation_id: str | None = None
 
     @model_validator(mode="after")
     def check_question(self) -> "QueryRequest":
@@ -53,7 +55,7 @@ class QueryRequest(BaseModel):
 
 
 class SourceSnippet(BaseModel):
-    item_id: int
+    item_id: str
     title: str | None
     source_url: str | None
     chunk_text: str
@@ -63,3 +65,19 @@ class SourceSnippet(BaseModel):
 class QueryResponse(BaseModel):
     answer: str
     sources: list[SourceSnippet]
+    conversation_id: str
+
+
+class ConversationSummary(BaseModel):
+    id: str
+    title: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class MessageOut(BaseModel):
+    id: str
+    role: Literal["user", "assistant"]
+    content: str
+    sources: list[SourceSnippet] | None = None
+    created_at: datetime

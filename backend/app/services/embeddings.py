@@ -22,7 +22,10 @@ def _embed(texts: list[str], task_type: str) -> list[np.ndarray]:
         response = client.models.embed_content(
             model=settings.embedding_model,
             contents=texts,
-            config=types.EmbedContentConfig(task_type=task_type),
+            config=types.EmbedContentConfig(
+                task_type=task_type,
+                output_dimensionality=settings.embedding_dim,  # 768, matches vector(768)
+            ),
         )
     except errors.APIError as exc:
         logger.error("embedding_request_failed count=%d error=%s", len(texts), exc)

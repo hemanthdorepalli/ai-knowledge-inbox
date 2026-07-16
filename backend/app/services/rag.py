@@ -7,7 +7,6 @@ from app.logging_config import get_logger
 from app.schemas import SourceSnippet
 from app.services.embeddings import embed_query
 from app.services.gemini_client import client
-from app.services.vector_store import vector_index
 
 logger = get_logger(__name__)
 
@@ -19,9 +18,11 @@ SYSTEM_PROMPT = (
 )
 
 
-def answer_question(question: str) -> tuple[str, list[SourceSnippet]]:
+def answer_question(question: str, *, user_id: str) -> tuple[str, list[SourceSnippet]]:
     query_embedding = embed_query(question)
-    matches = vector_index.search(query_embedding, top_k=settings.top_k)
+    matches = repository.search_chunks(
+        user_id=user_id, query_embedding=query_embedding, top_k=settings.top_k
+    )
 
     if not matches:
         return (
@@ -30,19 +31,15 @@ def answer_question(question: str) -> tuple[str, list[SourceSnippet]]:
             [],
         )
 
-    chunk_ids = [chunk_id for chunk_id, _ in matches]
-    chunk_details = repository.get_chunks_by_ids(chunk_ids)
-
     sources = [
         SourceSnippet(
-            item_id=chunk_details[chunk_id]["item_id"],
-            title=chunk_details[chunk_id]["title"],
-            source_url=chunk_details[chunk_id]["source_url"],
-            chunk_text=chunk_details[chunk_id]["chunk_text"],
-            score=round(score, 4),
+            item_id=str(m["item_id"]),
+            title=m["title"],
+            source_url=m["source_url"],
+            chunk_text=m["chunk_text"],
+            score=round(float(m["similarity"]), 4),
         )
-        for chunk_id, score in matches
-        if chunk_id in chunk_details
+        for m in matches
     ]
 
     context_block = "\n\n---\n\n".join(

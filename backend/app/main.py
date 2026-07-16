@@ -5,11 +5,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import settings
-from app.db import init_db
+from app.db import close_pool, init_pool
 from app.errors import AppError
 from app.logging_config import configure_logging, get_logger
-from app.routers import items, query
-from app.services.vector_store import vector_index
+from app.routers import conversations, items, query
 
 configure_logging()
 logger = get_logger(__name__)
@@ -17,10 +16,10 @@ logger = get_logger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_db()
-    vector_index.load_from_db()
+    init_pool()
     logger.info("startup_complete")
     yield
+    close_pool()
 
 
 app = FastAPI(title="AI Knowledge Inbox", version="1.0.0", lifespan=lifespan)
@@ -51,3 +50,4 @@ def health() -> dict:
 
 app.include_router(items.router)
 app.include_router(query.router)
+app.include_router(conversations.router)

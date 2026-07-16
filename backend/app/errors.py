@@ -18,7 +18,19 @@ class ItemNotFoundError(AppError):
     status_code = 404
 
 
+class AuthError(AppError):
+    """Raised when a request has a missing, invalid, or expired auth token."""
+
+    status_code = 401
+
+
 class EmptyContentError(AppError):
+    status_code = 422
+
+
+class DocumentError(AppError):
+    """Raised when an uploaded document is unsupported, too large, or unreadable."""
+
     status_code = 422
 
 
