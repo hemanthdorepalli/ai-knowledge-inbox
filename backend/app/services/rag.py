@@ -1,8 +1,10 @@
 """Retrieval + answering.
 
-Embeddings come from Gemini; the chat model is Groq (OpenAI-compatible API).
-Splitting providers keeps each doing what it's good at -- Groq has no embedding
-models, and Gemini's chat free tier is far too small (~20 requests/day).
+Both embeddings and chat run on Gemini. Chat goes through Gemini's
+OpenAI-compatible endpoint (see chat_client / config), so this whole module --
+including the MCP tool-calling loop -- is written against the OpenAI chat API
+and works unchanged if chat is later pointed at another OpenAI-compatible
+provider (e.g. Groq).
 """
 
 from openai import APIError
@@ -13,8 +15,8 @@ from app.errors import LlmProviderError
 from app.logging_config import get_logger
 from app.schemas import SourceSnippet, ToolCallInfo
 from app.services import mcp_tools, usage
+from app.services.chat_client import client
 from app.services.embeddings import embed_query
-from app.services.groq_client import client
 
 logger = get_logger(__name__)
 
@@ -32,7 +34,13 @@ SYSTEM_PROMPT = (
 
 
 def _is_tool_use_failure(exc: APIError) -> bool:
-    """True when the provider rejected the model's own malformed tool call."""
+    """True when the provider rejected the model's own malformed tool call.
+
+    The exact marker is provider-specific ("tool_use_failed" is Groq/Llama's);
+    it simply won't match on providers that don't emit it, in which case the
+    error propagates normally. Kept so the tools-off retry still fires if chat
+    is pointed back at Groq.
+    """
     return "tool_use_failed" in str(exc)
 
 
@@ -104,10 +112,10 @@ def answer_question(
                 **({"tools": tools} if tools else {}),
             )
         except APIError as exc:
-            # Llama models occasionally emit a malformed tool call, which the
-            # provider rejects with `tool_use_failed`. That's a formatting slip,
-            # not a real failure -- retry once without tools so the user still
-            # gets an answer from their saved content instead of a 502.
+            # Some models occasionally emit a malformed tool call, which the
+            # provider rejects (Groq/Llama's marker is `tool_use_failed`). That's
+            # a formatting slip, not a real failure -- retry once without tools so
+            # the user still gets an answer from their saved content instead of a 502.
             if tools and _is_tool_use_failure(exc):
                 logger.warning("tool_use_failed_retrying_without_tools error=%s", exc)
                 tools = None

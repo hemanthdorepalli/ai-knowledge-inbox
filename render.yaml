@@ -11,17 +11,19 @@ services:
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     plan: free
     envVars:
-      # Embeddings: Gemini. Chat: Groq (Gemini's chat free tier is ~20/day).
+      # Gemini powers both embeddings and chat (one key). Chat uses Gemini's
+      # OpenAI-compatibility endpoint; override CHAT_BASE_URL/CHAT_MODEL/
+      # CHAT_API_KEY to switch chat to another provider.
       - key: GEMINI_API_KEY
         sync: false
       - key: EMBEDDING_MODEL
         value: gemini-embedding-001
       - key: EMBEDDING_DIM
         value: "768"
-      - key: GROQ_API_KEY
-        sync: false
+      - key: CHAT_BASE_URL
+        value: https://generativelanguage.googleapis.com/v1beta/openai/
       - key: CHAT_MODEL
-        value: llama-3.3-70b-versatile
+        value: gemini-2.5-flash
       - key: SUPABASE_DB_URL
         sync: false
       - key: SUPABASE_URL

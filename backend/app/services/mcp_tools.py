@@ -6,8 +6,9 @@ describe each server's cached tools as function declarations, and when the model
 asks to call one, we make the actual MCP call ourselves and feed the (untrusted)
 result back as plain text -- never as instructions.
 
-Tools are declared in the OpenAI tool format, which is what Groq speaks.
-MCP tool input schemas are already JSON Schema, so they drop straight in.
+Tools are declared in the OpenAI tool format, which our chat endpoint speaks
+(Gemini's OpenAI-compatibility layer, or any OpenAI-compatible provider). MCP
+tool input schemas are already JSON Schema, so they drop straight in.
 """
 
 import json

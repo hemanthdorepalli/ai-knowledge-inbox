@@ -4,8 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
-    # Embeddings: Gemini. (Groq has no embedding models, and Gemini's embedding
-    # free tier is far roomier than its chat one.)
+    # Gemini powers both embeddings and chat here, using one GEMINI_API_KEY.
     gemini_api_key: str
     embedding_model: str = "gemini-embedding-001"
     # Gemini can return 768/1536/3072-dim embeddings. We use 768 because
@@ -13,12 +12,22 @@ class Settings(BaseSettings):
     # and cheaper while still high quality. Must match vector(768) in the schema.
     embedding_dim: int = 768
 
-    # Chat: Groq. Gemini's free tier allows only ~20 chat requests/day, which
-    # isn't usable; Groq's is far more generous and is OpenAI-API-compatible,
-    # so we talk to it with the OpenAI SDK pointed at Groq's base URL.
-    groq_api_key: str
-    groq_base_url: str = "https://api.groq.com/openai/v1"
-    chat_model: str = "llama-3.3-70b-versatile"
+    # Chat goes through an OpenAI-compatible endpoint, so we use the OpenAI SDK
+    # pointed at a base URL rather than pulling in a second vendor SDK. The
+    # default is Gemini's OpenAI-compatibility layer (same GEMINI_API_KEY,
+    # generous free tier, and reliable function calling for MCP tools). To swap
+    # providers -- e.g. back to Groq -- set CHAT_BASE_URL + CHAT_MODEL +
+    # CHAT_API_KEY; no code changes needed.
+    chat_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
+    chat_model: str = "gemini-2.5-flash"
+    # Defaults to gemini_api_key when empty (see resolved_chat_api_key), so the
+    # single-provider setup needs only one key. Set it to point chat at a
+    # different provider than embeddings.
+    chat_api_key: str = ""
+
+    @property
+    def resolved_chat_api_key(self) -> str:
+        return self.chat_api_key or self.gemini_api_key
 
     # Supabase Postgres connection string (Project Settings -> Database -> URI).
     supabase_db_url: str
@@ -38,10 +47,10 @@ class Settings(BaseSettings):
     # (embeddings) and chat, to protect the shared API keys from runaway cost.
     #
     # Note: this is only a real guardrail while it's below the provider's own
-    # ceiling. Groq's free tier allows ~100k tokens/day for the *whole account*,
-    # so at 1M per user a single user can exhaust the account before hitting
-    # their own limit -- they'd see Groq's 429 rather than ours. Lower this if
-    # the quota should actually bound spend.
+    # ceiling. On a free tier the provider's per-day cap can be lower than this
+    # per-user quota, in which case a user hits the provider's 429 before their
+    # own limit. Lower this (or use a paid key) if the quota should actually
+    # bound spend.
     default_token_quota: int = 1_000_000
 
     # Length of the rolling usage window. The reset is lazy: the first request
