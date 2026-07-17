@@ -38,8 +38,20 @@ class Settings(BaseSettings):
     # Public hostname this backend is served on (e.g. "my-api.onrender.com").
     # The bundled demo MCP server keeps DNS-rebinding protection enabled, which
     # validates the Host header against an allowlist -- so the deployed host has
-    # to be named here or requests to /mcp-demo get rejected with a 421.
+    # to be allowed or requests to /mcp-demo are rejected with a 421.
+    #
+    # Usually you don't need to set this: the host is auto-detected from the
+    # platform (see public_hostname below). Set it only to override, or on a
+    # platform we can't detect.
     public_host: str = ""
+
+    # Render sets this automatically to the service's external hostname.
+    render_external_hostname: str = ""
+
+    @property
+    def public_hostname(self) -> str:
+        """The hostname this app is reachable at, explicit setting first."""
+        return self.public_host or self.render_external_hostname
 
     # Max tool-calling round trips per question, so a misbehaving MCP server
     # (or a model stuck calling tools) can't loop indefinitely on one request.

@@ -70,7 +70,7 @@ Runs at `http://localhost:8000` — API docs at `/docs`, health at `/health`.
 | `SUPABASE_DB_URL` | Supabase → Settings → Database → **Session pooler** URI (URL-encode special characters in the password) |
 | `SUPABASE_URL` / `SUPABASE_ANON_KEY` | Supabase → Settings → API |
 | `CORS_ORIGINS` | Comma-separated allowed frontend origins |
-| `PUBLIC_HOST` | This backend's public hostname (deployment only — see MCP notes) |
+| `PUBLIC_HOST` | Optional. This backend's public hostname — auto-detected on Render; set only to override (see MCP notes) |
 
 > **Use the Session pooler URL, not the direct connection.** The direct host
 > (`db.<ref>.supabase.co`) resolves to IPv6-only, which many hosts (including
@@ -239,8 +239,10 @@ A **demo MCP server** is bundled at `/mcp-demo/mcp` (`get_current_time`, `roll_d
 the feature is testable without standing up your own server.
 
 > The MCP SDK enables DNS-rebinding protection, validating the `Host` header against an
-> allowlist that defaults to localhost. Set **`PUBLIC_HOST`** to the backend's public
-> hostname in deployment, or requests to the demo server return `421`.
+> allowlist that defaults to **localhost only** — so a deployed instance rejects its own
+> public URL with `421` unless that host is allowed. The app auto-detects its hostname
+> (Render's `RENDER_EXTERNAL_HOSTNAME`) and allowlists it, keeping the protection on;
+> **`PUBLIC_HOST`** overrides this if auto-detection isn't possible.
 
 ### Grounded answers
 The model is instructed to answer only from the retrieved context and to say when it
@@ -361,9 +363,8 @@ Deployed as a monorepo: backend on **Render** (`rootDir: backend`, see
 [`render.yaml`](render.yaml)), frontend on **Netlify** (`base: frontend`, see
 [`netlify.toml`](netlify.toml)).
 
-After deploying, set on the backend: `CORS_ORIGINS` to the frontend URL and
-`PUBLIC_HOST` to the backend's hostname; and add the frontend URL to Supabase's
-Site URL + Redirect URLs.
+After deploying, set `CORS_ORIGINS` on the backend to the frontend URL, and add the
+frontend URL to Supabase's Site URL + Redirect URLs.
 
 > On Render's free tier the service spins down when idle, so the first request after
 > a pause can take ~30–60s to wake.

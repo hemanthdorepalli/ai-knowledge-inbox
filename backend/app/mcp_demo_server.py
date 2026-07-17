@@ -5,9 +5,13 @@ their own MCP server first. Exposes two safe, side-effect-free tools.
 
 Note on transport security: the MCP SDK enables DNS-rebinding protection by
 default, which validates the incoming Host header against an allowlist that
-defaults to localhost only. We keep that protection ON and explicitly allow
-this deployment's public host (PUBLIC_HOST) -- otherwise requests to the
-deployed URL are rejected with 421 Misdirected Request.
+defaults to localhost only. We keep that protection ON and allow this
+deployment's own public host -- otherwise requests to the deployed URL are
+rejected with 421 Misdirected Request.
+
+The host is auto-detected from the platform (Render sets
+RENDER_EXTERNAL_HOSTNAME), so this works out of the box; PUBLIC_HOST is only
+needed as an override or on a platform we can't detect.
 """
 
 import random
@@ -17,13 +21,24 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
 from app.config import settings
+from app.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 def _allowed_hosts() -> list[str]:
-    hosts = ["localhost", "localhost:8000", "127.0.0.1", "127.0.0.1:8000"]
-    if settings.public_host:
-        # Both bare host and :443 form, since proxies vary in what they forward.
-        hosts += [settings.public_host, f"{settings.public_host}:443"]
+    hosts = ["localhost", "127.0.0.1", "localhost:*", "127.0.0.1:*"]
+    host = settings.public_hostname
+    if host:
+        # Bare host plus a port wildcard, since proxies differ in whether they
+        # forward the port in the Host header.
+        hosts += [host, f"{host}:*"]
+        logger.info("mcp_demo_allowed_host host=%s", host)
+    else:
+        logger.warning(
+            "mcp_demo_no_public_host: /mcp-demo will reject non-local requests with 421. "
+            "Set PUBLIC_HOST to this service's hostname."
+        )
     return hosts
 
 
