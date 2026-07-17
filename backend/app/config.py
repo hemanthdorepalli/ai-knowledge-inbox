@@ -4,13 +4,21 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
+    # Embeddings: Gemini. (Groq has no embedding models, and Gemini's embedding
+    # free tier is far roomier than its chat one.)
     gemini_api_key: str
     embedding_model: str = "gemini-embedding-001"
-    chat_model: str = "gemini-2.5-flash"
     # Gemini can return 768/1536/3072-dim embeddings. We use 768 because
     # pgvector's HNSW index supports up to 2000 dimensions, and 768 is smaller
     # and cheaper while still high quality. Must match vector(768) in the schema.
     embedding_dim: int = 768
+
+    # Chat: Groq. Gemini's free tier allows only ~20 chat requests/day, which
+    # isn't usable; Groq's is far more generous and is OpenAI-API-compatible,
+    # so we talk to it with the OpenAI SDK pointed at Groq's base URL.
+    groq_api_key: str
+    groq_base_url: str = "https://api.groq.com/openai/v1"
+    chat_model: str = "llama-3.3-70b-versatile"
 
     # Supabase Postgres connection string (Project Settings -> Database -> URI).
     supabase_db_url: str

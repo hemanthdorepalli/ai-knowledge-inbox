@@ -14,7 +14,7 @@ RENDER_EXTERNAL_HOSTNAME), so this works out of the box; PUBLIC_HOST is only
 needed as an override or on a platform we can't detect.
 """
 
-import random
+import time
 from datetime import datetime, timezone
 
 from mcp.server.fastmcp import FastMCP
@@ -24,6 +24,8 @@ from app.config import settings
 from app.logging_config import get_logger
 
 logger = get_logger(__name__)
+
+_STARTED_AT = time.monotonic()
 
 
 def _allowed_hosts() -> list[str]:
@@ -60,7 +62,13 @@ def get_current_time() -> str:
 
 
 @demo_mcp.tool()
-def roll_dice(sides: int = 6) -> str:
-    """Roll a die with the given number of sides (default 6) and return the result."""
-    sides = max(2, min(sides, 1000))
-    return f"Rolled a {sides}-sided die: {random.randint(1, sides)}"
+def get_server_status() -> str:
+    """Get this backend's live status: version and how long it has been running."""
+    uptime = int(time.monotonic() - _STARTED_AT)
+    hours, rem = divmod(uptime, 3600)
+    minutes, seconds = divmod(rem, 60)
+    return (
+        f"AI Knowledge Inbox backend | status: healthy | version: 1.0.0 | "
+        f"uptime: {hours}h {minutes}m {seconds}s | "
+        f"server time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}"
+    )

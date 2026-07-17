@@ -3,6 +3,8 @@
 fastapi==0.139.0
 uvicorn[standard]==0.51.0
 google-genai==2.10.0
+# Groq speaks the OpenAI API, so the OpenAI SDK is our chat client.
+openai==2.46.0
 httpx==0.28.1
 beautifulsoup4==4.15.0
 numpy==2.5.1

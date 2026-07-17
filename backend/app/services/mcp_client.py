@@ -55,14 +55,29 @@ async def _call_tool_async(url: str, auth_token: str | None, tool_name: str, arg
             return text
 
 
+def _describe(exc: BaseException) -> str:
+    """Flatten an exception into a useful message.
+
+    The MCP client runs inside an anyio task group, so real failures surface as
+    ExceptionGroup("unhandled errors in a TaskGroup (1 sub-exception)") -- which
+    tells nobody anything. Unwrap to the actual causes.
+    """
+    if isinstance(exc, BaseExceptionGroup):
+        inner = "; ".join(_describe(e) for e in exc.exceptions)
+        return inner or str(exc)
+    text = str(exc).strip()
+    return f"{type(exc).__name__}: {text}" if text else type(exc).__name__
+
+
 def list_tools(*, url: str, auth_token: str | None = None) -> list[dict]:
     """Connect to an MCP server and return its tools. Raises LlmProviderError on failure."""
     assert_safe_external_url(url)
     try:
         return asyncio.run(_list_tools_async(url, auth_token))
     except Exception as exc:
-        logger.error("mcp_list_tools_failed url=%s error=%s", url, exc)
-        raise LlmProviderError(f"Could not connect to MCP server: {exc}") from exc
+        detail = _describe(exc)
+        logger.error("mcp_list_tools_failed url=%s error=%s", url, detail, exc_info=True)
+        raise LlmProviderError(f"Could not connect to MCP server: {detail}") from exc
 
 
 def call_tool(*, url: str, auth_token: str | None, tool_name: str, arguments: dict) -> str:
@@ -71,5 +86,6 @@ def call_tool(*, url: str, auth_token: str | None, tool_name: str, arguments: di
     try:
         return asyncio.run(_call_tool_async(url, auth_token, tool_name, arguments))
     except Exception as exc:
-        logger.error("mcp_call_tool_failed url=%s tool=%s error=%s", url, tool_name, exc)
-        return f"Tool call failed: {exc}"
+        detail = _describe(exc)
+        logger.error("mcp_call_tool_failed url=%s tool=%s error=%s", url, tool_name, detail, exc_info=True)
+        return f"Tool call failed: {detail}"

@@ -6,7 +6,7 @@ questions answered from **your own** content via a Retrieval-Augmented Generatio
 verifiable. Users can also connect **MCP servers** to give the assistant live tools
 it can call while answering.
 
-- **Backend:** Python + FastAPI, Supabase Postgres + pgvector, Google Gemini
+- **Backend:** Python + FastAPI, Supabase Postgres + pgvector, Gemini (embeddings) + Groq (chat)
 - **Frontend:** React + Vite + TypeScript + Tailwind
 - **Auth:** Google sign-in via Supabase Auth; per-user data isolated by Postgres RLS
 - **Vector search:** pgvector with an HNSW index (cosine)
@@ -21,7 +21,7 @@ it can call while answering.
   source snippets and similarity scores
 - **Chat history** — persistent conversations, new chat, delete chat
 - **MCP servers** — connect remote MCP servers; their tools become callable by the
-  assistant during a chat answer (via Gemini function calling)
+  assistant during a chat answer (via function calling)
 - **Token quotas** — a fixed per-user token budget covering both ingestion and chat,
   so a shared API key can't be run up
 
@@ -29,9 +29,9 @@ it can call while answering.
 
 ## Quick start
 
-You need **Python 3.11+**, **Node 18+**, a free
-[Gemini API key](https://aistudio.google.com/apikey), and a
-[Supabase](https://supabase.com) project.
+You need **Python 3.11+**, **Node 18+**, a [Supabase](https://supabase.com) project, and
+two free API keys: [Gemini](https://aistudio.google.com/apikey) (embeddings) and
+[Groq](https://console.groq.com/keys) (chat).
 
 ### 1. Database
 
@@ -66,7 +66,8 @@ Runs at `http://localhost:8000` — API docs at `/docs`, health at `/health`.
 
 | Variable | What it is |
 | --- | --- |
-| `GEMINI_API_KEY` | Your Gemini API key |
+| `GEMINI_API_KEY` | Gemini key — used for **embeddings** |
+| `GROQ_API_KEY` | Groq key — used for **chat** |
 | `SUPABASE_DB_URL` | Supabase → Settings → Database → **Session pooler** URI (URL-encode special characters in the password) |
 | `SUPABASE_URL` / `SUPABASE_ANON_KEY` | Supabase → Settings → API |
 | `CORS_ORIGINS` | Comma-separated allowed frontend origins |
@@ -111,8 +112,8 @@ QUERY
         │
         ├──▶ embed question (RETRIEVAL_QUERY)
         ├──▶ match_chunks() ──▶ pgvector HNSW cosine search ──▶ top-k chunks
-        ├──▶ MCP tools (if any connected) exposed to Gemini as function declarations
-        │       └─▶ Gemini calls a tool ──▶ we execute it against the MCP server
+        ├──▶ MCP tools (if any connected) exposed to the model as function declarations
+        │       └─▶ model calls a tool ──▶ we execute it against the MCP server
         │           ──▶ feed the result back (as untrusted text) ──▶ repeat (capped)
         └──▶ answer + cited sources + tool calls ──▶ persisted to conversation history
 ```
@@ -170,7 +171,7 @@ Errors return `{ "detail": "<message>" }` with a status chosen for the cause:
 | `404` | Item or conversation not found |
 | `422` | Invalid body, unsupported/oversized file, unsafe MCP URL |
 | `429` | User's token quota exhausted |
-| `502` | Upstream failure: URL fetch, Gemini, or MCP server |
+| `502` | Upstream failure: URL fetch, Gemini/Groq, or MCP server |
 
 Asking with an empty knowledge base is **not** an error — it returns `200` with an
 answer saying to add content first.
@@ -204,11 +205,22 @@ Every table carries a `user_id` with RLS policies (`auth.uid() = user_id`). Quer
 *also* scoped by `user_id` in the repository layer — defense in depth, so an app-layer
 bug alone can't leak another user's data.
 
-### Embeddings + LLM: Google Gemini, behind a thin wrapper
-`gemini-embedding-001` + `gemini-2.5-flash`, both on the free tier. Gemini embeddings
-are **asymmetric**: chunks use `RETRIEVAL_DOCUMENT`, questions use `RETRIEVAL_QUERY`,
-which measurably improves retrieval. The provider is isolated to `gemini_client.py` +
-two wrappers — this app was migrated from OpenAI to Gemini by changing only those.
+### Two providers: Gemini for embeddings, Groq for chat
+Each provider does what it's actually good at:
+
+- **Embeddings — Gemini `gemini-embedding-001`.** Groq has no embedding models at all,
+  and Gemini's embedding free tier (1000/day) is roomy.
+- **Chat — Groq `llama-3.3-70b-versatile`.** Gemini's *chat* free tier allows only ~20
+  requests/day, which is unusable even for a demo; Groq's is far larger. Groq exposes an
+  OpenAI-compatible API, so it's driven with the OpenAI SDK pointed at Groq's base URL
+  rather than yet another vendor SDK.
+
+Gemini embeddings are **asymmetric**: chunks use `RETRIEVAL_DOCUMENT`, questions use
+`RETRIEVAL_QUERY`, which measurably improves retrieval.
+
+Each provider is isolated to one client module (`gemini_client.py`, `groq_client.py`)
+plus a thin wrapper. That containment is why this app could migrate OpenAI → Gemini, and
+later move *chat only* to Groq, without touching retrieval, storage, or the API surface.
 
 Embedding calls are **batched to ≤100 per request** (Gemini's hard limit) and retry on
 the per-minute rate limit; the per-**day** quota fails fast instead of retrying, since
@@ -216,27 +228,35 @@ waiting a minute can't recover a daily cap.
 
 ### Token quotas
 Each user gets a fixed lifetime budget covering ingestion *and* chat. Chat usage is
-metered exactly from Gemini's `usage_metadata`; embeddings report no usage data, so
-they're estimated from character count (~4 chars/token) — deliberately a slight
-overcount rather than undercount.
+metered exactly from the chat response's reported token count; embeddings report no
+usage data, so they're estimated from character count (~4 chars/token) — deliberately a
+slight overcount rather than undercount.
 
 ### MCP integration & security
-Users connect **remote MCP servers**; their tools are exposed to Gemini as function
-declarations, and the model can call them mid-answer.
+Users connect **remote MCP servers**; their tools are exposed to the chat model as
+function declarations, and it can call them mid-answer.
 
-- **Remote-only, never stdio.** Spawning a user-supplied process would be remote code
-  execution on the backend.
+- **Remote-only (Streamable HTTP), never stdio.** Spawning a user-supplied process would
+  be remote code execution on the backend. This does exclude most community MCP servers
+  (which are stdio, built to run locally next to a desktop client) — the right trade for
+  a multi-tenant web app where users are untrusted.
 - **SSRF-validated.** Every URL is resolved and rejected if it points at
   loopback/private/link-local/reserved ranges (e.g. cloud metadata at `169.254.169.254`).
-- **We own the connection.** Gemini has a native `mcp_servers` passthrough, but using it
-  would hand SSRF validation and execution to Google's infrastructure. We connect and
-  execute ourselves instead.
+- **We own the connection.** Providers offer native MCP passthrough, but using it would
+  hand SSRF validation and execution to a third party. We connect and execute ourselves.
 - **Tool output is untrusted data** — fed back as text, never as instructions.
 - **Round-trips are capped** (`MCP_MAX_TOOL_ROUNDS`) so a misbehaving server or model
   can't loop forever.
 
-A **demo MCP server** is bundled at `/mcp-demo/mcp` (`get_current_time`, `roll_dice`) so
-the feature is testable without standing up your own server.
+A **demo MCP server** is bundled at `/mcp-demo/mcp` (`get_current_time`,
+`get_server_status`) so the feature is testable without standing up your own server.
+
+> Demo tools deliberately return data the model **cannot** fabricate (real clock, real
+> uptime). An earlier `roll_dice` tool was removed after testing: the model would call it
+> and then report *its own* random number instead of the tool's, which made a working
+> integration look broken. A tool whose output the model believes it could generate
+> itself is a bad demo tool — and a useful lesson about verifying tool *fidelity*, not
+> just that a call fired.
 
 > The MCP SDK enables DNS-rebinding protection, validating the `Host` header against an
 > allowlist that defaults to **localhost only** — so a deployed instance rejects its own
@@ -258,7 +278,7 @@ client so answers are auditable.
 | **Synchronous ingest** | A large PDF (hundreds of chunks) can exceed a request timeout, especially with rate-limit backoff | Background job queue; return `202` + poll status |
 | **Ingest atomicity** | The item is committed before its chunks — a crash mid-ingest orphans an item | One transaction across item + chunks, or a cleanup sweep |
 | **No dedup** | The same URL/document ingested twice duplicates chunks | Content hashing + upsert |
-| **Free-tier limits** | Gemini caps embeddings/chat per minute *and* per day | Paid tier, or queue + spread the work |
+| **Free-tier limits** | Gemini caps embeddings per minute *and* per day; Groq caps chat | Paid tier, or queue + spread the work |
 | **URL fetch** | JS-rendered pages, paywalls | Headless browser (Playwright) |
 | **Single-turn RAG** | Follow-ups like "what about its pricing?" lack prior context | Feed recent turns in, or rewrite follow-ups into standalone questions |
 | **Retrieval quality** | Fixed `top_k`, no reranking | Reranker model; hybrid keyword + vector search |
@@ -310,7 +330,8 @@ backend/app/
     documents.py       # extract text from PDF / DOCX / TXT / MD
     chunking.py        # chunking strategy
     embeddings.py      # Gemini embeddings (batching, rate-limit handling)
-    gemini_client.py   # Gemini client singleton
+    gemini_client.py   # Gemini client singleton (embeddings)
+    groq_client.py     # Groq chat client (OpenAI SDK -> Groq base URL)
     ingest_pipeline.py # get text -> chunk -> embed -> persist
     rag.py             # retrieve -> tool-calling loop -> grounded answer
     chat.py            # conversation/message persistence around a query

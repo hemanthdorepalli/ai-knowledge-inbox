@@ -1,4 +1,11 @@
-from google.genai import errors, types
+"""Retrieval + answering.
+
+Embeddings come from Gemini; the chat model is Groq (OpenAI-compatible API).
+Splitting providers keeps each doing what it's good at -- Groq has no embedding
+models, and Gemini's chat free tier is far too small (~20 requests/day).
+"""
+
+from openai import APIError
 
 from app import repository
 from app.config import settings
@@ -7,7 +14,7 @@ from app.logging_config import get_logger
 from app.schemas import SourceSnippet, ToolCallInfo
 from app.services import mcp_tools, usage
 from app.services.embeddings import embed_query
-from app.services.gemini_client import client
+from app.services.groq_client import client
 
 logger = get_logger(__name__)
 
@@ -17,7 +24,10 @@ SYSTEM_PROMPT = (
     "Prefer the saved context when it's relevant. If neither the context nor a tool "
     "can answer the question, say so clearly instead of guessing. Keep answers "
     "concise and reference which source number(s) you used, if any. Never mention "
-    "internal function/tool names in your answer -- just state the result naturally."
+    "internal function/tool names in your answer -- just state the result naturally. "
+    "When a tool returns a result, that result is authoritative: report its exact "
+    "values verbatim and never substitute your own, even for values that look "
+    "random or that you think you could generate yourself."
 )
 
 
@@ -35,7 +45,7 @@ def answer_question(
     matches = repository.search_chunks(
         user_id=user_id, query_embedding=query_embedding, top_k=settings.top_k
     )
-    tools, name_map = mcp_tools.build_gemini_tools(user_id=user_id)
+    tools, name_map = mcp_tools.build_chat_tools(user_id=user_id)
 
     if not matches and not tools:
         usage.record_usage(user_id=user_id, tokens=total_tokens)
@@ -73,47 +83,59 @@ def answer_question(
         "which source number(s) you used, if any."
     )
 
-    contents = [types.Content(role="user", parts=[types.Part(text=user_prompt)])]
+    messages: list[dict] = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": user_prompt},
+    ]
     tool_calls: list[ToolCallInfo] = []
     answer = ""
 
-    for round_num in range(settings.mcp_max_tool_rounds):
+    for _ in range(settings.mcp_max_tool_rounds):
         try:
-            response = client.models.generate_content(
+            response = client.chat.completions.create(
                 model=settings.chat_model,
-                contents=contents,
-                config=types.GenerateContentConfig(
-                    system_instruction=SYSTEM_PROMPT,
-                    temperature=0.2,
-                    tools=tools,
-                ),
+                messages=messages,
+                temperature=0.2,
+                **({"tools": tools} if tools else {}),
             )
-        except errors.APIError as exc:
+        except APIError as exc:
             usage.record_usage(user_id=user_id, tokens=total_tokens)
             logger.error("chat_completion_failed error=%s", exc)
             raise LlmProviderError(f"Answer generation failed: {exc}") from exc
 
-        if response.usage_metadata and response.usage_metadata.total_token_count:
-            total_tokens += response.usage_metadata.total_token_count
-        else:
-            total_tokens += usage.estimate_tokens(response.text or "")
+        if response.usage and response.usage.total_tokens:
+            total_tokens += response.usage.total_tokens
 
-        model_content = response.candidates[0].content
-        function_calls = [p.function_call for p in model_content.parts if p.function_call]
+        message = response.choices[0].message
 
-        if not function_calls:
-            answer = response.text or ""
+        if not message.tool_calls:
+            answer = message.content or ""
             break
 
-        contents.append(model_content)
-        response_parts = []
-        for fc in function_calls:
-            call_info = mcp_tools.execute_tool_call(function_call=fc, name_map=name_map)
-            tool_calls.append(call_info)
-            response_parts.append(
-                types.Part.from_function_response(name=fc.name, response={"result": call_info.result})
+        # Echo the assistant's tool-call turn back, then one "tool" message per
+        # call -- the shape the OpenAI chat API expects.
+        messages.append(
+            {
+                "role": "assistant",
+                "content": message.content,
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+                    }
+                    for tc in message.tool_calls
+                ],
+            }
+        )
+        for tc in message.tool_calls:
+            call_info = mcp_tools.execute_tool_call(
+                name=tc.function.name, raw_arguments=tc.function.arguments, name_map=name_map
             )
-        contents.append(types.Content(role="user", parts=response_parts))
+            tool_calls.append(call_info)
+            messages.append(
+                {"role": "tool", "tool_call_id": tc.id, "content": call_info.result}
+            )
     else:
         answer = (
             answer
