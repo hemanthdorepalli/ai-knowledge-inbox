@@ -146,16 +146,21 @@ create policy "messages_own_rows" on messages
     for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 -- ----------------------------------------------------------------------------
--- 7. Token usage: a fixed lifetime token budget per user, covering both
---    ingestion (embeddings) and chat. Protects the shared Gemini API key from
+-- 7. Token usage: a per-user token budget on a rolling 24h window, covering
+--    both ingestion (embeddings) and chat. Protects the shared API keys from
 --    runaway cost -- once a user's tokens_used reaches tokens_limit, the
 --    backend rejects further ingest/query requests with a clear 429.
+--
+--    period_started_at anchors the window. The reset is lazy: the next request
+--    after the window expires zeroes the counter (see repository.get_usage),
+--    so no scheduler or cron job is needed.
 -- ----------------------------------------------------------------------------
 create table if not exists user_usage (
-    user_id     uuid primary key references auth.users(id) on delete cascade,
-    tokens_used bigint not null default 0,
-    tokens_limit bigint not null default 50000,
-    updated_at  timestamptz not null default now()
+    user_id           uuid primary key references auth.users(id) on delete cascade,
+    tokens_used       bigint not null default 0,
+    tokens_limit      bigint not null default 1000000,
+    period_started_at timestamptz not null default now(),
+    updated_at        timestamptz not null default now()
 );
 
 alter table user_usage enable row level security;

@@ -230,6 +230,15 @@ export default function Sidebar({
   );
 }
 
+// "in 5h" / "in 42m" until the rolling quota window rolls over.
+function formatResetIn(resetsAt: string): string {
+  const ms = new Date(resetsAt).getTime() - Date.now();
+  if (!Number.isFinite(ms) || ms <= 0) return "soon";
+  const minutes = Math.round(ms / 60000);
+  if (minutes < 60) return `in ${minutes}m`;
+  return `in ${Math.round(minutes / 60)}h`;
+}
+
 function UsageBar({ usage }: { usage: Usage }) {
   const pct = usage.tokens_limit > 0 ? Math.min(100, (usage.tokens_used / usage.tokens_limit) * 100) : 0;
   const low = usage.tokens_remaining <= usage.tokens_limit * 0.1;
@@ -247,6 +256,9 @@ function UsageBar({ usage }: { usage: Usage }) {
           className={`h-full rounded-full transition-all ${low ? "bg-accent" : "bg-white/40"}`}
           style={{ width: `${pct}%` }}
         />
+      </div>
+      <div className="mt-1 text-right text-[10px] text-white/35">
+        resets {formatResetIn(usage.resets_at)}
       </div>
     </div>
   );

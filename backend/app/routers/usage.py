@@ -14,4 +14,5 @@ def get_usage(user_id: str = Depends(get_current_user_id)) -> UsageResponse:
         tokens_used=data["tokens_used"],
         tokens_limit=data["tokens_limit"],
         tokens_remaining=max(0, data["tokens_limit"] - data["tokens_used"]),
+        resets_at=usage_service.resets_at(data["period_started_at"]),
     )

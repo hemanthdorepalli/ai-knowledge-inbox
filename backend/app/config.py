@@ -34,9 +34,19 @@ class Settings(BaseSettings):
     chunk_overlap_chars: int = 150
     top_k: int = 5
 
-    # Fixed lifetime token budget given to a new user (covers both ingestion
-    # embeddings and chat). Protects the shared Gemini key from runaway cost.
-    default_token_quota: int = 50_000
+    # Token budget per user per rolling window, covering both ingestion
+    # (embeddings) and chat, to protect the shared API keys from runaway cost.
+    #
+    # Note: this is only a real guardrail while it's below the provider's own
+    # ceiling. Groq's free tier allows ~100k tokens/day for the *whole account*,
+    # so at 1M per user a single user can exhaust the account before hitting
+    # their own limit -- they'd see Groq's 429 rather than ours. Lower this if
+    # the quota should actually bound spend.
+    default_token_quota: int = 1_000_000
+
+    # Length of the rolling usage window. The reset is lazy: the first request
+    # after the window expires zeroes the counter, so no scheduler is needed.
+    quota_window_hours: int = 24
 
     # Dev-only escape hatch: allows MCP server URLs that resolve to localhost /
     # private IPs, so a developer can test against a locally-running MCP server.

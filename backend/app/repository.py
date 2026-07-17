@@ -193,16 +193,33 @@ def list_messages(*, user_id: str, conversation_id: str) -> list[dict]:
 
 
 def get_usage(*, user_id: str) -> dict:
-    """Return {tokens_used, tokens_limit}, creating the row on first use."""
+    """Return {tokens_used, tokens_limit, period_started_at}, creating the row
+    on first use and rolling the window over when it has expired.
+
+    The reset is done here, inside the same atomic upsert, rather than by a
+    scheduled job: whoever reads usage next rolls the window if it's due. That
+    keeps it correct with no cron, and safe under concurrent requests.
+    """
     with get_connection() as conn:
         row = conn.execute(
             """
-            INSERT INTO user_usage (user_id, tokens_limit)
-            VALUES (%s, %s)
-            ON CONFLICT (user_id) DO UPDATE SET user_id = EXCLUDED.user_id
-            RETURNING tokens_used, tokens_limit
+            INSERT INTO user_usage (user_id, tokens_limit, period_started_at)
+            VALUES (%s, %s, now())
+            ON CONFLICT (user_id) DO UPDATE SET
+                tokens_used = CASE
+                    WHEN user_usage.period_started_at <= now() - make_interval(hours => %s)
+                    THEN 0 ELSE user_usage.tokens_used END,
+                period_started_at = CASE
+                    WHEN user_usage.period_started_at <= now() - make_interval(hours => %s)
+                    THEN now() ELSE user_usage.period_started_at END
+            RETURNING tokens_used, tokens_limit, period_started_at
             """,
-            (user_id, settings.default_token_quota),
+            (
+                user_id,
+                settings.default_token_quota,
+                settings.quota_window_hours,
+                settings.quota_window_hours,
+            ),
         ).fetchone()
     return row
 

@@ -96,6 +96,7 @@ class UsageResponse(BaseModel):
     tokens_used: int
     tokens_limit: int
     tokens_remaining: int
+    resets_at: datetime
 
 
 class McpServerCreate(BaseModel):

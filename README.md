@@ -227,10 +227,23 @@ the per-minute rate limit; the per-**day** quota fails fast instead of retrying,
 waiting a minute can't recover a daily cap.
 
 ### Token quotas
-Each user gets a fixed lifetime budget covering ingestion *and* chat. Chat usage is
-metered exactly from the chat response's reported token count; embeddings report no
-usage data, so they're estimated from character count (~4 chars/token) — deliberately a
-slight overcount rather than undercount.
+Each user gets **1M tokens per rolling 24-hour window** (`DEFAULT_TOKEN_QUOTA` /
+`QUOTA_WINDOW_HOURS`), covering ingestion *and* chat. Chat usage is metered exactly from
+the chat response's reported token count; embeddings report no usage data, so they're
+estimated from character count (~4 chars/token) — deliberately a slight overcount rather
+than undercount.
+
+**The window resets lazily, not on a schedule.** Rather than a cron job sweeping every
+row at midnight, the reset is folded into the same atomic upsert that reads usage: if
+`period_started_at` is older than the window, the read zeroes the counter and restarts
+the clock. That means no scheduler to deploy or monitor, no thundering-herd reset spike,
+and each user's window is genuinely rolling from *their* first request. Doing it in one
+statement (rather than read-then-write) keeps it correct when concurrent requests race.
+
+> **Note on the free tier:** Groq's free plan caps the *whole account* at roughly 100k
+> tokens/day, so a 1M per-user quota sits well above the provider's real ceiling — in
+> practice you'd hit Groq's 429 first. The quota is the app's own fairness mechanism and
+> is sized for a paid key; lower `DEFAULT_TOKEN_QUOTA` to make it binding on free tier.
 
 ### MCP integration & security
 Users connect **remote MCP servers**; their tools are exposed to the chat model as
