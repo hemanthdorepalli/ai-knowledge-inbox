@@ -31,6 +31,11 @@ SYSTEM_PROMPT = (
 )
 
 
+def _is_tool_use_failure(exc: APIError) -> bool:
+    """True when the provider rejected the model's own malformed tool call."""
+    return "tool_use_failed" in str(exc)
+
+
 def answer_question(
     question: str, *, user_id: str
 ) -> tuple[str, list[SourceSnippet], list[ToolCallInfo]]:
@@ -99,6 +104,14 @@ def answer_question(
                 **({"tools": tools} if tools else {}),
             )
         except APIError as exc:
+            # Llama models occasionally emit a malformed tool call, which the
+            # provider rejects with `tool_use_failed`. That's a formatting slip,
+            # not a real failure -- retry once without tools so the user still
+            # gets an answer from their saved content instead of a 502.
+            if tools and _is_tool_use_failure(exc):
+                logger.warning("tool_use_failed_retrying_without_tools error=%s", exc)
+                tools = None
+                continue
             usage.record_usage(user_id=user_id, tokens=total_tokens)
             logger.error("chat_completion_failed error=%s", exc)
             raise LlmProviderError(f"Answer generation failed: {exc}") from exc
