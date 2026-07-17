@@ -1,23 +1,55 @@
 # AI Knowledge Inbox
 
-A minimal, single-user "knowledge inbox": save notes and URLs, then ask questions
-that are answered from your own saved content using a Retrieval-Augmented
-Generation (RAG) pipeline. Answers come back with the source snippets they were
-grounded in, so you can verify them.
+A multi-user AI knowledge assistant: save notes, links, and documents, then ask
+questions answered from **your own** content via a Retrieval-Augmented Generation
+(RAG) pipeline. Every answer cites the source snippets it was grounded in, so it's
+verifiable. Users can also connect **MCP servers** to give the assistant live tools
+it can call while answering.
 
-- **Backend:** Python + FastAPI, SQLite, Google Gemini (embeddings + chat)
+- **Backend:** Python + FastAPI, Supabase Postgres + pgvector, Google Gemini
 - **Frontend:** React + Vite + TypeScript + Tailwind
-- **Vector search:** brute-force cosine similarity over embeddings loaded into memory,
-  persisted in SQLite
+- **Auth:** Google sign-in via Supabase Auth; per-user data isolated by Postgres RLS
+- **Vector search:** pgvector with an HNSW index (cosine)
+
+---
+
+## Features
+
+- **Ingest** plain notes, URLs (fetched + extracted server-side), and documents
+  (PDF, DOCX, TXT, MD)
+- **Ask questions** and get answers grounded in your saved content, with cited
+  source snippets and similarity scores
+- **Chat history** — persistent conversations, new chat, delete chat
+- **MCP servers** — connect remote MCP servers; their tools become callable by the
+  assistant during a chat answer (via Gemini function calling)
+- **Token quotas** — a fixed per-user token budget covering both ingestion and chat,
+  so a shared API key can't be run up
 
 ---
 
 ## Quick start
 
-You need **Python 3.11+**, **Node 18+**, and a **free Gemini API key**
-(get one at https://aistudio.google.com/apikey).
+You need **Python 3.11+**, **Node 18+**, a free
+[Gemini API key](https://aistudio.google.com/apikey), and a
+[Supabase](https://supabase.com) project.
 
-### 1. Backend
+### 1. Database
+
+In the Supabase dashboard → **SQL Editor**, run [`supabase/schema.sql`](supabase/schema.sql).
+It enables pgvector and creates the tables, indexes, RLS policies, and the
+`match_chunks` similarity-search function.
+
+### 2. Google sign-in
+
+1. **Google Cloud Console** → Credentials → create an **OAuth client ID** (Web).
+   Set the authorized redirect URI to your Supabase callback:
+   `https://<project>.supabase.co/auth/v1/callback`
+2. **Supabase** → Authentication → Providers → **Google** → paste the Client ID +
+   Secret → enable.
+3. **Supabase** → Authentication → URL Configuration → add your app URL (e.g.
+   `http://localhost:5173`) to **Site URL** and **Redirect URLs**.
+
+### 3. Backend
 
 ```bash
 cd backend
@@ -26,258 +58,312 @@ python -m venv venv
 # macOS/Linux: source venv/bin/activate
 pip install -r requirements.txt
 
-cp .env.example .env        # then edit .env and set GEMINI_API_KEY
+cp .env.example .env   # then fill in the values below
 uvicorn app.main:app --reload
 ```
 
-Backend runs at `http://localhost:8000`. Interactive API docs at
-`http://localhost:8000/docs`. Health check at `http://localhost:8000/health`.
+Runs at `http://localhost:8000` — API docs at `/docs`, health at `/health`.
+
+| Variable | What it is |
+| --- | --- |
+| `GEMINI_API_KEY` | Your Gemini API key |
+| `SUPABASE_DB_URL` | Supabase → Settings → Database → **Session pooler** URI (URL-encode special characters in the password) |
+| `SUPABASE_URL` / `SUPABASE_ANON_KEY` | Supabase → Settings → API |
+| `CORS_ORIGINS` | Comma-separated allowed frontend origins |
+| `PUBLIC_HOST` | This backend's public hostname (deployment only — see MCP notes) |
+
+> **Use the Session pooler URL, not the direct connection.** The direct host
+> (`db.<ref>.supabase.co`) resolves to IPv6-only, which many hosts (including
+> Render) cannot reach.
 
 > Dependencies are pinned to versions with prebuilt wheels for Python 3.11–3.14,
 > so `pip install` needs no compiler.
 
-### 2. Frontend
+### 4. Frontend
 
 ```bash
 cd frontend
 npm install
-cp .env.example .env        # optional; defaults to http://localhost:8000
+cp .env.example .env   # set VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, VITE_API_BASE
 npm run dev
 ```
 
-Frontend runs at `http://localhost:5173`.
+Runs at `http://localhost:5173`.
 
 ---
 
 ## How it works
 
 ```
-                 ┌─────────────┐        ┌──────────────────────────────┐
-  POST /ingest → │  ingest_    │  note  │ normalize text               │
-  (note | url)   │  pipeline   │───────▶│ or fetch URL + extract text  │
-                 └─────┬───────┘        └──────────────┬───────────────┘
-                       │                               │
-                       │              chunk (paragraph-aware, overlap)
-                       │                               │
-                       │              embed chunks (Gemini)
-                       │                               │
-                       ▼                               ▼
-                 ┌───────────────┐          ┌─────────────────────┐
-                 │ SQLite        │          │ in-memory vector    │
-                 │ items+chunks  │◀────────▶│ index (cosine)      │
-                 └───────────────┘          └─────────────────────┘
-                       ▲                               ▲
-  POST /query ─────────┘   embed question → top-k cosine → build context
-  (question)               → LLM answer + cited sources ─┘
-```
+INGEST (note | url | document)
+  POST /ingest, /ingest/document
+        │
+        ▼
+  ingest_pipeline ──▶ get text: normalize note | fetch+extract URL | parse PDF/DOCX
+        │
+        ├──▶ chunking      (paragraph-aware packing, ~1000 chars, ~150 overlap)
+        ├──▶ embeddings    (Gemini, batched ≤100, RETRIEVAL_DOCUMENT)
+        └──▶ repository    (items + chunks, embedding vector(768)) ──▶ Postgres/pgvector
 
-The vector index is the durable SQLite `chunks` table plus an in-memory numpy
-matrix rebuilt on startup. Ingest writes to both; query reads from memory.
+
+QUERY
+  POST /query
+        │
+        ├──▶ embed question (RETRIEVAL_QUERY)
+        ├──▶ match_chunks() ──▶ pgvector HNSW cosine search ──▶ top-k chunks
+        ├──▶ MCP tools (if any connected) exposed to Gemini as function declarations
+        │       └─▶ Gemini calls a tool ──▶ we execute it against the MCP server
+        │           ──▶ feed the result back (as untrusted text) ──▶ repeat (capped)
+        └──▶ answer + cited sources + tool calls ──▶ persisted to conversation history
+```
 
 ---
 
 ## API
 
-Base URL: `http://localhost:8000`
+All endpoints except `/health` require `Authorization: Bearer <supabase-jwt>`.
 
-### `POST /ingest` → `201 Created`
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/health` | Liveness check (open) |
+| `POST` | `/ingest` | Add a note or URL |
+| `POST` | `/ingest/document` | Upload a PDF/DOCX/TXT/MD (multipart) |
+| `GET` | `/items` | List saved items (snippet + chunk count) |
+| `POST` | `/query` | Ask a question → answer + sources + tool calls |
+| `GET` | `/conversations` | List chat history |
+| `GET` | `/conversations/{id}/messages` | Load a conversation's messages |
+| `DELETE` | `/conversations/{id}` | Delete a conversation |
+| `GET` | `/usage` | Token usage + limit |
+| `GET`/`POST` | `/mcp-servers` | List / connect MCP servers |
+| `PATCH`/`DELETE` | `/mcp-servers/{id}` | Enable-disable / remove |
+| `POST` | `/mcp-servers/{id}/refresh` | Re-discover a server's tools |
 
-Add a note or a URL. Fetches + extracts URL content server-side, then chunks,
-embeds, and stores it.
+**`POST /ingest`**
 
 ```jsonc
-// note
 { "type": "note", "content": "Text of the note", "title": "optional" }
-// url
-{ "type": "url", "url": "https://example.com/article", "title": "optional" }
+{ "type": "url",  "url": "https://example.com/article", "title": "optional" }
 ```
 
-Response:
+**`POST /query`**
+
+```json
+{ "question": "What did the article say about pricing?", "conversation_id": null }
+```
 
 ```json
 {
-  "id": 1,
-  "type": "url",
-  "title": "Example Article",
-  "source_url": "https://example.com/article",
-  "created_at": "2026-07-08T12:00:00+00:00",
-  "chunk_count": 7
-}
-```
-
-### `GET /items` → `200 OK`
-
-List saved items (newest first) with a snippet and chunk count. Raw content is
-not returned in the list to keep the payload small.
-
-### `POST /query` → `200 OK`
-
-```json
-{ "question": "What did the article say about pricing?" }
-```
-
-Response:
-
-```json
-{
-  "answer": "The article says pricing starts at $10/mo … (Source 1).",
-  "sources": [
-    {
-      "item_id": 1,
-      "title": "Example Article",
-      "source_url": "https://example.com/article",
-      "chunk_text": "Pricing starts at $10/mo for the starter tier…",
-      "score": 0.83
-    }
-  ]
+  "answer": "Pricing starts at $10/mo (Source 1).",
+  "sources": [{ "item_id": "…", "title": "Example Article", "chunk_text": "…", "score": 0.83 }],
+  "conversation_id": "…",
+  "tool_calls": []
 }
 ```
 
 ### Error model
 
-Errors return `{ "detail": "<message>" }` with a status code chosen for the cause:
+Errors return `{ "detail": "<message>" }` with a status chosen for the cause:
 
 | Status | When |
-| ------ | ---- |
-| `422`  | Invalid request body (missing/empty `content`/`url`/`question`, bad URL scheme) |
-| `502`  | Upstream failure: URL fetch failed/timed out, or Gemini embeddings/chat failed |
-| `404`  | Item not found |
-| `500`  | Unexpected server error |
+| --- | --- |
+| `401` | Missing/invalid/expired login token |
+| `404` | Item or conversation not found |
+| `422` | Invalid body, unsupported/oversized file, unsafe MCP URL |
+| `429` | User's token quota exhausted |
+| `502` | Upstream failure: URL fetch, Gemini, or MCP server |
 
-Asking a question with an empty knowledge base is **not** an error — it returns
-`200` with an answer telling you to add content first.
+Asking with an empty knowledge base is **not** an error — it returns `200` with an
+answer saying to add content first.
 
 ---
 
 ## Design decisions & tradeoffs
 
 ### Chunking: paragraph-aware packing with overlap
+Text is split on blank lines, then paragraphs are packed into ~1000-character chunks,
+each repeating the previous chunk's trailing ~150 characters (**overlap**) so a fact
+straddling a boundary keeps its context. Oversized paragraphs are hard-split.
 
-Text is split on blank lines into paragraphs (natural semantic units), then
-paragraphs are packed into chunks up to ~1000 characters. Each new chunk repeats
-the trailing ~150 characters of the previous one (**overlap**), so a fact that
-straddles a boundary still has surrounding context on both sides. A single
-paragraph larger than the budget is hard-split on a fixed window.
+- **Why character-based, not token-based:** no tokenizer dependency, good enough at
+  this scale (~4 chars/token).
+- **Cost:** boundaries can land mid-sentence, and character budgets don't map exactly
+  to the model's token limit. In production: token-aware, sentence-respecting chunking
+  tuned against a retrieval eval set.
 
-- **Why character-based, not token-based:** simpler, no tokenizer dependency, and
-  "good enough" at this scale. Characters are a rough proxy for tokens (~4 chars/token).
-- **Cost of the shortcut:** chunk boundaries can land mid-sentence for hard-split
-  paragraphs, and character budgets don't map exactly to the embedding model's token
-  limit. For production I'd switch to token-aware, sentence-boundary-respecting chunking
-  (e.g. tiktoken) and tune size/overlap against a retrieval eval set.
+### Vector search: Postgres + pgvector (HNSW)
+Embeddings are stored in a `vector(768)` column with an HNSW cosine index; search runs
+inside Postgres via the `match_chunks` function.
 
-### Vector store: SQLite + in-memory brute-force cosine
+- **Why 768 dims:** Gemini can return 3072, but pgvector's HNSW index supports up to
+  2000 — and 768 is cheaper and smaller while still strong.
+- **Tradeoff:** HNSW is *approximate* — a small recall loss for a large speed gain.
+  Exact brute-force search would be precise but linear in chunk count.
 
-Embeddings are stored as `float32` blobs in the SQLite `chunks` table. On startup
-they're loaded into a normalized numpy matrix; each query is a single matrix-vector
-product (`O(n)` over all chunks).
-
-- **Why:** a single-user inbox has thousands of chunks at most. Brute force is exact
-  (no recall loss from approximate indexes), needs zero extra infrastructure, and is a
-  few lines of numpy. SQLite gives durability for free.
-- **Cost:** the whole index lives in RAM and is rebuilt on every restart; search is
-  linear in chunk count.
+### Multi-tenancy: Postgres Row-Level Security
+Every table carries a `user_id` with RLS policies (`auth.uid() = user_id`). Queries are
+*also* scoped by `user_id` in the repository layer — defense in depth, so an app-layer
+bug alone can't leak another user's data.
 
 ### Embeddings + LLM: Google Gemini, behind a thin wrapper
+`gemini-embedding-001` + `gemini-2.5-flash`, both on the free tier. Gemini embeddings
+are **asymmetric**: chunks use `RETRIEVAL_DOCUMENT`, questions use `RETRIEVAL_QUERY`,
+which measurably improves retrieval. The provider is isolated to `gemini_client.py` +
+two wrappers — this app was migrated from OpenAI to Gemini by changing only those.
 
-`gemini-embedding-001` for embeddings, `gemini-2.5-flash` for answers — both on
-Gemini's free tier, so the app runs at zero cost. Gemini embeddings are asymmetric:
-chunks are embedded with `task_type=RETRIEVAL_DOCUMENT` and questions with
-`RETRIEVAL_QUERY`, which improves retrieval over embedding both the same way. Both
-are isolated in `services/embeddings.py` and `services/rag.py` over a single
-`gemini_client.py`, so swapping providers (Gemini was itself dropped in for OpenAI
-in one wrapper file) is a contained change, not a rewrite.
+Embedding calls are **batched to ≤100 per request** (Gemini's hard limit) and retry on
+the per-minute rate limit; the per-**day** quota fails fast instead of retrying, since
+waiting a minute can't recover a daily cap.
+
+### Token quotas
+Each user gets a fixed lifetime budget covering ingestion *and* chat. Chat usage is
+metered exactly from Gemini's `usage_metadata`; embeddings report no usage data, so
+they're estimated from character count (~4 chars/token) — deliberately a slight
+overcount rather than undercount.
+
+### MCP integration & security
+Users connect **remote MCP servers**; their tools are exposed to Gemini as function
+declarations, and the model can call them mid-answer.
+
+- **Remote-only, never stdio.** Spawning a user-supplied process would be remote code
+  execution on the backend.
+- **SSRF-validated.** Every URL is resolved and rejected if it points at
+  loopback/private/link-local/reserved ranges (e.g. cloud metadata at `169.254.169.254`).
+- **We own the connection.** Gemini has a native `mcp_servers` passthrough, but using it
+  would hand SSRF validation and execution to Google's infrastructure. We connect and
+  execute ourselves instead.
+- **Tool output is untrusted data** — fed back as text, never as instructions.
+- **Round-trips are capped** (`MCP_MAX_TOOL_ROUNDS`) so a misbehaving server or model
+  can't loop forever.
+
+A **demo MCP server** is bundled at `/mcp-demo/mcp` (`get_current_time`, `roll_dice`) so
+the feature is testable without standing up your own server.
+
+> The MCP SDK enables DNS-rebinding protection, validating the `Host` header against an
+> allowlist that defaults to localhost. Set **`PUBLIC_HOST`** to the backend's public
+> hostname in deployment, or requests to the demo server return `421`.
 
 ### Grounded answers
-
-The LLM is instructed to answer **only** from the retrieved context and to say when
-the context is insufficient rather than hallucinate. Retrieved chunks are returned to
-the client as `sources` (with similarity scores) so answers are auditable.
+The model is instructed to answer only from the retrieved context and to say when it
+can't, rather than hallucinate. Retrieved chunks and tool calls are returned to the
+client so answers are auditable.
 
 ---
 
 ## What breaks at scale
 
 | Concern | Breaks when | Fix |
-| ------- | ----------- | --- |
-| **Vector search** | Tens of thousands+ of chunks — linear scan gets slow, RAM grows | Move to pgvector / Qdrant / a proper ANN index (HNSW) |
-| **In-memory index** | Multiple backend processes/replicas — each holds its own copy, and it rebuilds on restart | Externalize the index to a shared vector DB |
-| **SQLite writes** | Concurrent writers — SQLite serializes writes | Postgres |
-| **Synchronous ingest** | Large pages / many chunks block the request | Background job queue (Celery/RQ/arq); return `202 Accepted` + status |
-| **Ingest atomicity** | Item is committed before its chunks in a separate transaction — a crash mid-ingest can orphan an item | Single transaction across item + chunks, or a cleanup sweep |
-| **No dedup** | Same URL ingested twice → duplicate chunks | Content hashing + upsert |
-| **URL fetch** | JS-rendered pages, paywalls, PDFs | Headless browser (Playwright) + per-type extractors |
+| --- | --- | --- |
+| **Synchronous ingest** | A large PDF (hundreds of chunks) can exceed a request timeout, especially with rate-limit backoff | Background job queue; return `202` + poll status |
+| **Ingest atomicity** | The item is committed before its chunks — a crash mid-ingest orphans an item | One transaction across item + chunks, or a cleanup sweep |
+| **No dedup** | The same URL/document ingested twice duplicates chunks | Content hashing + upsert |
+| **Free-tier limits** | Gemini caps embeddings/chat per minute *and* per day | Paid tier, or queue + spread the work |
+| **URL fetch** | JS-rendered pages, paywalls | Headless browser (Playwright) |
+| **Single-turn RAG** | Follow-ups like "what about its pricing?" lack prior context | Feed recent turns in, or rewrite follow-ups into standalone questions |
+| **Retrieval quality** | Fixed `top_k`, no reranking | Reranker model; hybrid keyword + vector search |
 
 ## What I'd add for production
 
-- **Auth + multi-tenancy** (out of scope here — single user by design)
 - **Async ingestion** with a job queue and status polling
-- **Retries + backoff** on Gemini calls; circuit breaker on repeated failures
-- **Rate limiting** and request size caps on ingest
-- **Retrieval evals** (golden question/answer set) to tune chunking, `top_k`, and prompts
-- **Observability:** request tracing, token/cost metrics, latency histograms
+- **Reranking + hybrid search** for retrieval quality
+- **Multi-turn conversational context**
+- **Retrieval evals** (golden Q&A set) to tune chunking, `top_k`, and prompts
+- **Observability:** tracing, token/cost metrics, latency histograms
+- **Encryption at rest** for stored MCP auth tokens
 
 ---
 
 ## Debuggability
 
 - **Structured logging** — one logger per module, key=value events
-  (`item_ingested item_id=1 type=url chunks=7`, `query_answered … sources=5`,
-  `url_fetched url=… chars=…`). Noisy httpx/google-genai loggers are quieted.
-- **Domain errors map to HTTP status codes** via a small exception hierarchy
-  (`app/errors.py`) and a single FastAPI exception handler, so the client always
-  gets a clean `{ "detail": ... }`.
-- **Input validation** lives in Pydantic schemas (`app/schemas.py`) — the wrong
-  shape is rejected with a clear `422` before any work happens.
+  (`item_ingested item_id=… chunks=7`, `query_answered … tool_calls=1`,
+  `mcp_tool_call server=… tool=…`, `quota_exceeded …`). Noisy third-party loggers quieted.
+- **Domain errors → HTTP status codes** via a small exception hierarchy (`app/errors.py`)
+  and one FastAPI handler, so clients always get a clean `{ "detail": … }`.
+- **Input validation** in Pydantic schemas — bad shapes are rejected with a clear `422`
+  before any work (or spend) happens.
 
 ---
 
 ## Project structure
 
 ```
-backend/
-  app/
-    main.py              # app wiring, CORS, lifespan (init DB + load index), error handler
-    config.py            # env-driven settings (models, chunk sizes, top_k)
-    db.py                # SQLite schema + connection helper
-    schemas.py           # Pydantic request/response models
-    errors.py            # domain exceptions → HTTP status codes
-    logging_config.py    # structured logging setup
-    repository.py        # data access for items + chunks (no business logic)
-    routers/
-      items.py           # POST /ingest, GET /items
-      query.py           # POST /query
-    services/
-      ingestion.py       # fetch URL + extract text; normalize notes
-      ingest_pipeline.py # orchestrates normalize → chunk → embed → persist
-      chunking.py        # chunking strategy
-      embeddings.py      # Gemini embeddings wrapper (doc vs query task types)
-      gemini_client.py   # Gemini client singleton
-      vector_store.py    # in-memory cosine index over SQLite embeddings
-      rag.py             # retrieve → build context → LLM answer + sources
-  tests/                 # offline unit tests (chunking, vector search)
+backend/app/
+  main.py              # app wiring, CORS, lifespan (DB pool + MCP session), error handler
+  config.py            # env-driven settings
+  auth.py              # verifies the Supabase JWT -> user_id (dependency)
+  db.py                # Postgres pool (psycopg) + pgvector registration
+  schemas.py           # Pydantic request/response models
+  errors.py            # domain exceptions -> HTTP status codes
+  logging_config.py    # structured logging
+  repository.py        # all SQL, every query scoped to a user_id
+  mcp_demo_server.py   # bundled demo MCP server, mounted at /mcp-demo
+  routers/
+    items.py           # POST /ingest, POST /ingest/document, GET /items
+    query.py           # POST /query
+    conversations.py   # chat history CRUD
+    usage.py           # GET /usage
+    mcp_servers.py     # MCP server CRUD
+  services/
+    ingestion.py       # fetch URL + extract text; normalize notes
+    documents.py       # extract text from PDF / DOCX / TXT / MD
+    chunking.py        # chunking strategy
+    embeddings.py      # Gemini embeddings (batching, rate-limit handling)
+    gemini_client.py   # Gemini client singleton
+    ingest_pipeline.py # get text -> chunk -> embed -> persist
+    rag.py             # retrieve -> tool-calling loop -> grounded answer
+    chat.py            # conversation/message persistence around a query
+    usage.py           # token quota metering + enforcement
+    mcp_client.py      # connects to remote MCP servers (SSRF-checked)
+    mcp_tools.py       # bridges MCP tools into Gemini function calling
+    security.py        # SSRF protection for user-supplied URLs
+  tests/               # offline unit tests (no network/API key needed)
 
-frontend/
-  src/
-    api.ts               # single API client (error normalization, base URL)
-    types.ts             # shared types mirroring backend schemas
-    App.tsx              # layout + shared item state
-    components/
-      AddItemForm.tsx    # add note / URL
-      ItemList.tsx       # list saved items
-      AskPanel.tsx       # question box + request state
-      AnswerView.tsx     # answer + cited source snippets
+frontend/src/
+  api.ts               # single API client (auth header, error normalization)
+  types.ts             # shared types mirroring backend schemas
+  supabase.ts          # Supabase client
+  App.tsx              # auth gate: spinner -> Login -> Inbox
+  hooks/
+    useAuth.ts         # Supabase session state
+    useTypewriter.ts   # progressive answer reveal
+  components/
+    Login.tsx           # Google sign-in
+    Inbox.tsx           # main app: state + layout
+    Sidebar.tsx         # chats, knowledge base, usage bar, MCP entry
+    ChatThread.tsx      # conversation + empty state
+    MessageBubble.tsx   # one message (+ tool chips, sources)
+    Composer.tsx        # chat input, + button to add knowledge
+    AddItemModal.tsx    # add note / link / document
+    McpServersModal.tsx # connect & manage MCP servers
+    SourceCitations.tsx # expandable cited chunks
+    ToolCallChips.tsx   # MCP tools used in an answer
+
+supabase/schema.sql    # tables, indexes, RLS policies, match_chunks()
 ```
 
 ---
 
 ## Tests
 
-Offline unit tests (no network, no API key needed) cover the chunking strategy and
-the cosine ranking:
+Offline unit tests (no network, no API key, no database needed):
 
 ```bash
 cd backend
 pip install pytest
 pytest -q
 ```
+
+---
+
+## Deployment
+
+Deployed as a monorepo: backend on **Render** (`rootDir: backend`, see
+[`render.yaml`](render.yaml)), frontend on **Netlify** (`base: frontend`, see
+[`netlify.toml`](netlify.toml)).
+
+After deploying, set on the backend: `CORS_ORIGINS` to the frontend URL and
+`PUBLIC_HOST` to the backend's hostname; and add the frontend URL to Supabase's
+Site URL + Redirect URLs.
+
+> On Render's free tier the service spins down when idle, so the first request after
+> a pause can take ~30–60s to wake.
