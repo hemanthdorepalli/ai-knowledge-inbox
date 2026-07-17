@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     # Must stay False in any real deployment -- it exists purely for local dev.
     allow_local_mcp_urls: bool = False
 
+    # Public hostname this backend is served on (e.g. "my-api.onrender.com").
+    # The bundled demo MCP server keeps DNS-rebinding protection enabled, which
+    # validates the Host header against an allowlist -- so the deployed host has
+    # to be named here or requests to /mcp-demo get rejected with a 421.
+    public_host: str = ""
+
     # Max tool-calling round trips per question, so a misbehaving MCP server
     # (or a model stuck calling tools) can't loop indefinitely on one request.
     mcp_max_tool_rounds: int = 4

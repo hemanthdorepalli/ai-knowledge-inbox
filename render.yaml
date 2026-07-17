@@ -27,3 +27,8 @@ services:
         sync: false
       - key: CORS_ORIGINS
         sync: false
+      # Public hostname of this service (no scheme). Required so the bundled
+      # demo MCP server accepts requests to the deployed URL -- it keeps DNS
+      # rebinding protection on and validates the Host header against this.
+      - key: PUBLIC_HOST
+        sync: false
